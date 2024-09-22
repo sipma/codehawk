@@ -45,6 +45,7 @@ open CCHTypesToPretty
 (* cchpre *)
 open CCHMemoryBase
 open CCHPreTypes
+open CCHProofObligation
 
 (* cchanalyze *)
 open CCHAnalysisTypes
@@ -74,6 +75,7 @@ object (self)
        let deps = DLocal [invindex] in
        let msg = "value is address of a string literal" in
        Some (deps, msg)
+    | CBaseVar v -> self#xpr_implies_safe invindex (XVar v)
     | CStackAddress stackvar when poq#env#is_local_variable stackvar ->
        let (vinfo,offset) = poq#env#get_local_variable stackvar in
        let _ =
@@ -145,14 +147,27 @@ object (self)
     | _ -> None
 
   method private var_implies_safe (invindex: int) (v: variable_t) =
-    if poq#env#is_memory_address v then
-      let memref = poq#env#get_memory_reference v in
-      let _ =
-        poq#set_diagnostic_arg
-          1 ("memory variable: "  ^ (self#memref_to_string memref)) in
-      self#memref_implies_safe invindex memref
-    else
-      None
+    let result =
+      if poq#env#is_memory_address v then
+        let memref = poq#env#get_memory_reference v in
+        let _ =
+          poq#set_diagnostic_arg
+            1 ("memory variable: "  ^ (self#memref_to_string memref)) in
+        self#memref_implies_safe invindex memref
+      else
+        None in
+    match result with
+    | Some result -> Some result
+    | _ ->
+       if poq#env#is_function_return_value v then
+         let callee = poq#env#get_callvar_callee v in
+         begin
+           poq#set_diagnostic_arg
+             1 ("function return value from: " ^ callee.vname);
+           None
+         end
+       else
+         None
 
   method private xpr_implies_safe
                    (invindex: int) (x: xpr_t): (dependencies_t * string) option =
@@ -160,10 +175,79 @@ object (self)
     | XVar v -> self#var_implies_safe invindex v
     | _ -> None
 
-  method private inv_implies_safe (inv: invariant_int)  =
-    match inv#expr with
-    | Some x -> self#xpr_implies_safe inv#index x
-    | _ -> None
+  method private xprlist_implies_safe (invindex: int) (l: xpr_t list) =
+    match l with
+    | [] -> None
+    | h::tl ->
+       match self#xpr_implies_safe invindex h with
+       | None ->
+          let _ =
+            poq#set_diagnostic_arg
+              1 ("first alternative breaks the chain: " ^ (x2s h)) in
+          None
+       | Some r ->
+          List.fold_left (fun acc x ->
+              match acc with
+              | None -> None
+              | Some (deps, msg) ->
+                 begin
+                   match self#xpr_implies_safe invindex x with
+                   | Some (d, m) ->
+                      let deps = join_dependencies deps d in
+                      let msg = msg ^ "; " ^ m in
+                      Some (deps, msg)
+                   | _ ->
+                      let _ =
+                        poq#set_diagnostic_arg
+                          1 ("xpr alternative breaks the chain: " ^ (x2s x)) in
+                      None
+                 end) (Some r) tl
+
+  method private regions_implies_safe (invindex: int) (symlist: symbol_t list) =
+    match symlist with
+    | [] -> None
+    | _ ->
+       let memregmgr = poq#env#get_variable_manager#memregmgr in
+       let msgs =
+         List.map (fun s ->
+             p2s (memregmgr#get_memory_region s#getSeqNumber)#toPretty) symlist in
+       begin
+         poq#set_diagnostic_arg 1 (String.concat "; " msgs);
+         None
+       end
+
+  method private inv_implies_safe (inv: invariant_int) =
+    let r = None in
+    let r =
+      match r with
+      | Some _ -> r
+      | _ ->
+         match inv#lower_bound_xpr with
+         | Some x -> self#xpr_implies_safe inv#index x
+         | _ -> None in
+    let r =
+      match r with
+      | Some _ -> r
+      | _ ->
+         match inv#get_fact with
+         | NonRelationalFact (_, FRegionSet symlist) ->
+            self#regions_implies_safe inv#index symlist
+         | _ -> None in
+    let r =
+      match r with
+      | Some _ -> r
+      | _ ->
+         match inv#expr with
+         | Some x -> self#xpr_implies_safe inv#index x
+         | _ -> None in
+    let r =
+      match r with
+      | Some _ -> r
+      | _ ->
+         match inv#lower_bound_xpr_alternatives with
+         | None | Some [] -> None
+         | Some l -> self#xprlist_implies_safe inv#index l in
+    r
 
   method check_safe =
     match invs with
