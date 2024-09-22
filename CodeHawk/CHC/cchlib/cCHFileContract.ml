@@ -68,6 +68,7 @@ object (self)
   val mutable static: bool = false
   val mutable constant: bool = false
   val mutable not_null: bool = false
+  val mutable valid_mem: bool = false
   val mutable initialized_fields: string list = []
 
   method set_lower_bound (lbv: int) = lb <- Some lbv
@@ -81,6 +82,8 @@ object (self)
   method set_const = constant <-true
 
   method set_not_null = not_null <- true
+
+  method set_valid_mem = valid_mem <- true
 
   method add_initialized_field (s: string) =
     initialized_fields <- s :: initialized_fields
@@ -99,6 +102,8 @@ object (self)
 
   method is_not_null = not_null
 
+  method is_valid_mem = valid_mem
+
   method has_lower_bound = match lb with Some _ -> true | _ -> false
 
   method has_upper_bound = match ub with Some _ -> true | _ -> false
@@ -114,6 +119,7 @@ object (self)
       (if has "static" && (get "static") = "yes" then self#set_static);
       (if has "const" && (get "const") = "yes" then self#set_const);
       (if has "notnull" && (get "notnull") = "yes" then self#set_not_null);
+      (if has "validmem" && (get "validmem") = "yes" then self#set_valid_mem);
       (if has "finit" then self#add_initialized_field (get "finit"))
     end
 
@@ -125,6 +131,7 @@ object (self)
       (if self#is_static then set "static" "yes");
       (if self#is_const then set "const" "yes");
       (if self#is_not_null then set "notnull" "yes");
+      (if self#is_valid_mem then set "validmem" "yes");
       (match self#get_lower_bound with Some lb -> seti "lb" lb | _ -> ());
       (match self#get_upper_bound with Some ub -> seti "ub" ub | _ -> ());
       (match self#get_value with Some v -> seti "value" v | _ -> ());
@@ -139,7 +146,8 @@ object (self)
          | Some ub -> LBLOCK [STR "; ub: "; INT ub] | _ -> STR "");
         (if self#is_static then STR "; static" else STR "");
         (if self#is_const then STR "; const" else STR "");
-        (if self#is_not_null then STR "; not-null" else STR "")
+        (if self#is_not_null then STR "; not-null" else STR "");
+        (if self#is_valid_mem then STR "; valid-mem" else STR "")
       ]
 
 end
@@ -675,9 +683,11 @@ object (self)
 
   method collect_file_attributes =
     let xfuns = file_environment#get_external_functions in
+    let afuns = file_environment#get_application_functions in
     let gvars = file_environment#get_globalvars in
     begin
       List.iter self#get_function_attributes xfuns;
+      List.iter self#get_function_attributes afuns;
       List.iter self#get_globalvar_attributes gvars
     end
 

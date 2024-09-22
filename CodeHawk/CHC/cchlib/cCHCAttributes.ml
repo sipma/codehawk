@@ -133,7 +133,7 @@ let convert_attribute_to_function_conditions
      (pre, [], [])
 
   | Attr ("noreturn", []) ->
-     ([], [XFalse], [])
+     ([], [XFalse], [XPreservesAllMemory])
 
   | Attr ("null_terminated_string_arg", attrparams) ->
      let pre =
@@ -195,6 +195,7 @@ let attribute_update_globalvar_contract
   | Attr ("chkc_static", []) -> gvarc#set_static
   | Attr ("chkc_const", []) -> gvarc#set_const
   | Attr ("chkc_not_null", []) -> gvarc#set_not_null
+  | Attr ("chkc_valid_mem", []) -> gvarc#set_valid_mem
   | Attr (s, attrparams) ->
      log_info
        ("global variable attribute %s for %s with %d parameters not "

@@ -730,6 +730,7 @@ class type globalvar_contract_int =
     method set_static: unit
     method set_const: unit
     method set_not_null: unit
+    method set_valid_mem: unit
     method add_initialized_field: string -> unit
 
     method get_name: string
@@ -739,6 +740,7 @@ class type globalvar_contract_int =
     method is_static: bool
     method is_const: bool
     method is_not_null: bool
+    method is_valid_mem: bool
 
     method has_lower_bound: bool
     method has_upper_bound: bool

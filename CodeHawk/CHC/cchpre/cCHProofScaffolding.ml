@@ -127,6 +127,13 @@ object (self)
                 let xpredix = id#index_xpredicate xpred in
                 fApi#add_contract_precondition fdecls xpredix
               else
+                ());
+             (if gvar#is_valid_mem then
+                let xpred =
+                  XValidMem (ArgValue (ParGlobal gvar#get_name, ArgNoOffset)) in
+                let xpredix = id#index_xpredicate xpred in
+                fApi#add_contract_precondition fdecls xpredix
+              else
                 ())
            end) gvars)
     end
