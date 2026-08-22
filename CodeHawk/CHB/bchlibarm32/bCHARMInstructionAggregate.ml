@@ -568,6 +568,23 @@ let identify_pseudo_ldrsb
   | _ -> None
 
 
+let has_predicated_neighbor
+      (ch: pushback_stream_int)
+      (first: arm_assembly_instruction_int)
+      (last: arm_assembly_instruction_int): bool =
+    (match TR.to_option
+             (get_arm_assembly_instruction (first#get_address#add_int (-4))) with
+     | Some instr -> instr#has_opcode_condition
+     | _ -> false)
+    || (let iaddr = last#get_address#add_int 4 in
+        let bytes = ch#peek_doubleword 0 in
+        let opcode =
+          try
+            disassemble_arm_instruction ch iaddr bytes
+          with _ -> OpInvalid in
+        BCHARMOpcodeRecords.is_opcode_conditional opcode)
+
+
 (* format of predicate assignment (in ARM): assigns the result of a test as a
    0/1 value to a register
 
@@ -575,7 +592,7 @@ let identify_pseudo_ldrsb
    MOVEQ  Rx, #1
  *)
 let identify_predicate_assignment
-      (_ch: pushback_stream_int)
+      (ch: pushback_stream_int)
       (instr: arm_assembly_instruction_int):
       (bool
        * arm_assembly_instruction_int
@@ -600,8 +617,11 @@ let identify_predicate_assignment
                   && (not (imm1#to_numerical#equal imm2#to_numerical))
                   && (has_inverse_cc c1)
                   && ((Option.get (get_inverse_cc c1)) = c2) ->
-             let inverse = is_zero imm2 in
-             Some (inverse, movinstr, instr, rd)
+             if has_predicated_neighbor ch movinstr instr then
+               None
+             else
+               let inverse = is_zero imm2 in
+               Some (inverse, movinstr, instr, rd)
           | _ -> None)
       | _ -> None)
   | _ -> None
@@ -619,7 +639,7 @@ or
   MOVNE Rx, imm2
  *)
 let identify_ternary_assignment
-      (_ch: pushback_stream_int)
+      (ch: pushback_stream_int)
       (instr: arm_assembly_instruction_int):
       (arm_assembly_instruction_int
        * arm_assembly_instruction_int
@@ -653,14 +673,21 @@ let identify_ternary_assignment
                         && (rd#get_register = rdreg)
                         && (has_inverse_cc c1)
                         && ((Option.get (get_inverse_cc c1)) = c2) ->
-                 Some (movinstr, instr, rd, imm1#to_numerical, n2)
+                 if has_predicated_neighbor ch movinstr instr then
+                   None
+                 else
+                   Some (movinstr, instr, rd, imm1#to_numerical, n2)
               | BitwiseNot (false, c1, rd, imm1, _)
                    when imm1#is_immediate
                         && (rd#get_register = rdreg)
                         && (has_inverse_cc c1)
                         && ((Option.get (get_inverse_cc c1)) = c2) ->
                  (match (negval imm1#to_numerical) with
-                  | Some n1 -> Some (movinstr, instr, rd, n1, n2)
+                  | Some n1 ->
+                     if has_predicated_neighbor ch movinstr instr then
+                       None
+                     else
+                       Some (movinstr, instr, rd, n1, n2)
                   | _ -> None)
               | _ -> None)
           | _ -> None)
