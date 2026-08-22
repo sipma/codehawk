@@ -130,13 +130,28 @@ let make_conditional_predicate
       ~(testinstr: arm_assembly_instruction_int)
       ~(condloc: location_int)
       ~(testloc: location_int) =
-  let (frozenvars, optxpr, opsused) =
+  let testfloc = get_floc testloc in
+  let get_default_conditional_expr () =
     arm_conditional_expr
       ~condopc:condinstr#get_opcode
       ~testopc:testinstr#get_opcode
       ~condloc:condloc
       ~testloc:testloc in
-  (frozenvars, optxpr, opsused)
+  if is_opcode_conditional testinstr#get_opcode then
+    let finfo = testfloc#f in
+    match get_associated_test_instr finfo testloc#ci with
+    | Some (testtestloc , testtestinstr) ->
+       arm_conditional_conditional_expr
+         ~condopc:condinstr#get_opcode
+         ~testopc:testinstr#get_opcode
+         ~testtestopc: testtestinstr#get_opcode
+         ~condloc
+         ~testloc
+         ~testtestloc
+    | _ ->
+       get_default_conditional_expr ()
+  else
+    get_default_conditional_expr ()
 
 
 let make_instr_local_tests
