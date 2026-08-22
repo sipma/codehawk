@@ -982,6 +982,11 @@ object
 
   method pushback: int -> unit
 
+  (** [peek_doubleword offset] returns the doubleword at offset [offset] from
+      the current position in the stream without consuming the bytes (the
+      position of the stream is unaffected). *)
+  method peek_doubleword: int -> doubleword_int
+
   (* accessors *)
   method pos: int
   method sub: int -> int -> string

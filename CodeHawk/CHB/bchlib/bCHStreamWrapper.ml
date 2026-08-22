@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny Sipma
-   Copyright (c) 2022-2023 Aarno Labs LLC
+   Copyright (c) 2022-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -353,6 +353,15 @@ object (self)
       else
 	ch <- new big_endian_stream_wrapper_t input
     end
+
+  method peek_doubleword (n: int) =
+    let input = IO.input_string (string_suffix s (pos + n)) in
+    let tmpch =
+      if little_endian then
+        (new little_endian_stream_wrapper_t input)
+      else
+        (new big_endian_stream_wrapper_t input) in
+    tmpch#read_doubleword
 
 end
 
