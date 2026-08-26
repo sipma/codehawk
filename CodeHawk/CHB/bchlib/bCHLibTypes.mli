@@ -5778,6 +5778,7 @@ class type proofobligations_int =
 
   end
 
+
 (** {b Principal access point for function characteristics and analysis results.}
 
     This data structure keeps track of:
@@ -5786,7 +5787,18 @@ class type proofobligations_int =
     - jump targets
 
     It also maintains a summary of the function api and semantics.
-*)
+ *)
+
+(** Fragments represent sequences of instructions within a basic block that
+    are executed under the same polarity of a shared governing condition.*)
+type fragment_bucket_t = FragThen | FragElse
+
+type fragment_membership_t = {
+    fmem_openerloc: location_int;
+    fmem_bucket: fragment_bucket_t
+  }
+
+
 class type function_info_int =
 object
 
@@ -6069,6 +6081,22 @@ object
       address.*)
   method get_test_variables:
            ctxt_iaddress_t -> (variable_t * variable_t) list
+
+  (** [finfo#set_fragment_membership iaddr mem] records that the instruction at
+      [iaddr] belongs to a predicated fragment starting at [mem]'s openerloc
+      with polarity given by [mem']s bucket (currently only used in arm32).*)
+  method set_fragment_membership:
+           ctxt_iaddress_t -> fragment_membership_t -> unit
+
+  (** [finfo#get_fragment_membership iaddr] returns fragment membership info if
+      the instruction at [iaddr] belongs to a fragment.
+
+      raise BCH_failure if the instruction at [iaddr] does not have an
+      associated fragment_membership.*)
+  method get_fragment_membership: ctxt_iaddress_t -> fragment_membership_t
+
+  method has_fragment_membership: ctxt_iaddress_t -> bool
+
 
   (** {2 Connections}*)
 
@@ -6618,6 +6646,7 @@ class type floc_int =
     (* returns true if this instruction has a test expression for a conditional
        jump. *)
     method has_test_expr: bool
+
 
     (** {1 Jump targets}*)
 

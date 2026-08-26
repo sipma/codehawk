@@ -1670,6 +1670,7 @@ object (self)
 
   val cc_user_to_setter = H.create 3                             (* cc-users *)
   val test_expressions = H.create 3                      (* test-expressions *)
+  val fragment_membership = H.create 3
   val test_variables = H.create 3                          (* test-variables *)
 
   (* val cvariable_types = H.create 3 *)     (* types of constant-value variables *)
@@ -2125,6 +2126,23 @@ object (self)
     let _ = H.iter (fun ix v -> result := (ix,v) :: !result) test_expressions in
     !result
 
+  method set_fragment_membership
+           (iaddr: ctxt_iaddress_t) (fm: fragment_membership_t) =
+    H.replace fragment_membership iaddr fm
+
+  method get_fragment_membership
+           (iaddr: ctxt_iaddress_t): fragment_membership_t =
+    if H.mem fragment_membership iaddr then
+      H.find fragment_membership iaddr
+    else
+      raise
+        (BCH_failure
+           (LBLOCK [STR "function_info#get_fragment_membership: ";
+                    STR iaddr]))
+
+  method has_fragment_membership (iaddr: ctxt_iaddress_t) =
+    H.mem fragment_membership iaddr
+
   method set_test_variables
            (test_iaddr: ctxt_iaddress_t)
            (vars: (variable_t * variable_t) list) =
@@ -2484,6 +2502,46 @@ object (self)
       constant_table#set v (mkNumericalFromString (n#getAttribute "value")))
       (node#getTaggedChildren "var")
 
+  method private write_xml_fragment_memberships (node: xml_element_int) =
+    let l = ref []  in
+    let _ = H.iter (fun k e -> l := (k, e) :: !l) fragment_membership in
+    let l = List.sort (fun (k1, _) (k2, _) -> Stdlib.compare k1 k2) !l in
+    begin
+      node#appendChildren
+        (List.map (fun (k, fm) ->
+             let eNode = xmlElement "fmem" in
+             begin
+               eNode#setAttribute "opener" fm.fmem_openerloc#ci;
+               eNode#setAttribute "iaddr" k;
+               eNode#setAttribute
+                 "pol" (match fm.fmem_bucket with
+                        | FragThen -> "then" | FragElse -> "else");
+               eNode
+             end) l)
+    end
+
+  method private read_xml_fragment_memberships (node: xml_element_int) =
+    let getcc = node#getTaggedChildren in
+    List.iter (fun eNode ->
+        let get = eNode#getAttribute in
+        let iaddr = get "iaddr" in
+        let opener =
+          BCHLocation.ctxt_string_to_location (self#get_address) (get "opener") in
+        let polarity =
+          match (get "pol") with
+          | "then" -> FragThen
+          | "else" -> FragElse
+          | s ->
+             raise
+               (BCH_failure
+                  (LBLOCK [STR "read_xml_fragment_memberships: ";
+                           self#get_address#toPretty;
+                           STR ": ";
+                           STR s])) in
+        H.add fragment_membership iaddr
+          {fmem_openerloc = opener; fmem_bucket = polarity})
+      (getcc "fmem")
+
   method private write_xml_test_expressions (node:xml_element_int) =
     let l = ref [] in
     let _ = H.iter (fun k e -> l := (k,e) :: !l) test_expressions in
@@ -2594,6 +2652,7 @@ object (self)
     let cNode = xmlElement "constants" in
     let tvNode = xmlElement "test-variables" in
     let teNode = xmlElement "test-expressions" in
+    let fmNode = xmlElement "fragment-memberships" in
     let jtNode = xmlElement "jump-targets" in
     let ctNode = xmlElement "call-targets" in
     let fsNode = xmlElement "format-strings" in
@@ -2608,6 +2667,7 @@ object (self)
       self#write_xml_constants cNode;
       self#write_xml_cc_users ccNode;
       self#write_xml_test_expressions teNode;
+      self#write_xml_fragment_memberships fmNode;
       self#write_xml_test_variables tvNode;
       (* self#write_xml_jump_targets jtNode ; *)
       self#write_xml_call_targets ctNode;
@@ -2624,6 +2684,7 @@ object (self)
           ccNode;
           tvNode;
           teNode;
+          fmNode;
           cNode;
 	  ctNode;
           fsNode;
@@ -2649,6 +2710,8 @@ object (self)
 	    self#read_xml_test_variables (getc "test-variables"));
 	(if hasc "test-expressions" then
 	   self#read_xml_test_expressions (getc "test-expressions"));
+        (if hasc "fragment-memberships" then
+           self#read_xml_fragment_memberships (getc "fragment-memberships"));
         (if hasc "format-strings" then
            self#read_xml_format_strings (getc "format-strings"));
 	(if hasc "base-pointers" then
