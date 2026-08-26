@@ -1195,7 +1195,15 @@ and reduce_and m e1 e2 =
   else if syntactically_equal e1 e2 then
     (true, e1)
   else
-    default
+    match (e1, e2) with
+
+    (* (x == y) and (x != y) *)
+    | (XOp (XEq, [x1; y1]), XOp (XNe, [x2; y2]))
+         when syntactically_equal x1 x2 && syntactically_equal y1 y2 ->
+       (true, false_constant_expr)
+
+    | _ ->
+       default
 
 
 and reduce_shiftleft (m: bool) (e1: xpr_t) (e2: xpr_t): bool * xpr_t =
