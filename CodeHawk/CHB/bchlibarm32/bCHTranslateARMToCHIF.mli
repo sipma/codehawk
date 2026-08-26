@@ -43,7 +43,8 @@ type setter_key_t = {
 
 type fragment_t = {
     fr_key: setter_key_t;
-    fr_opencc: arm_opcode_cc_t; (* the cc that defines "then" *)
+    fr_opencc: arm_opcode_cc_t;    (* the cc that defines "then" *)
+    fr_openerloc: location_int; (* location of first instr in fragment *)
     fr_thenbucket: cmd_t list;  (* starts with thentest, grows by append *)
     fr_elsebucket: cmd_t list   (* starts with elsetest *)
   }

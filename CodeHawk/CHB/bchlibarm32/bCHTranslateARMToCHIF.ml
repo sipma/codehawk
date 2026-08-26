@@ -135,7 +135,8 @@ type setter_key_t = {
 
 type fragment_t = {
     fr_key: setter_key_t;
-    fr_opencc: arm_opcode_cc_t; (* the cc that defines "then" *)
+    fr_opencc: arm_opcode_cc_t;    (* the cc that defines "then" *)
+    fr_openerloc: location_int; (* location of first instr in fragment *)
     fr_thenbucket: cmd_t list;  (* starts with thentest, grows by append *)
     fr_elsebucket: cmd_t list   (* starts with elsetest *)
   }
@@ -183,9 +184,11 @@ let cmdstate_flush (cs: cmdstate_t): cmdstate_t =
   match cs.cs_open with
   | None -> cs
   | Some fr ->
+     let invlabel = get_invariant_label fr.fr_openerloc in
+     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
      let branch =
        BRANCH [LF.mkCode fr.fr_thenbucket; LF.mkCode fr.fr_elsebucket] in
-     {cs_flat = cs.cs_flat @ [branch]; cs_open = None}
+     {cs_flat = cs.cs_flat @ [openerinvop; branch]; cs_open = None}
 
 (* Extend cmdstate with the cmds for an unconditional / condition-covered
    instruction: closes any open fragment, and appends the already wrapped
@@ -200,6 +203,7 @@ let cmdstate_append_predicated
       (cs: cmdstate_t)
       ~(key: setter_key_t)
       ~(cc: arm_opcode_cc_t)
+      ~(openerloc: location_int)
       ~(thentest: cmd_t list)
       ~(elsetest: cmd_t list)
       ~(unit_cmds: cmd_t list): cmdstate_t =
@@ -214,7 +218,9 @@ let cmdstate_append_predicated
      let cs = cmdstate_flush cs in
      {cs with
        cs_open =
-         Some {fr_key = key; fr_opencc = cc;
+         Some {fr_key = key;
+               fr_opencc = cc;
+               fr_openerloc = openerloc;
                fr_thenbucket = thentest @ unit_cmds;
                fr_elsebucket = elsetest}}
 
@@ -234,9 +240,13 @@ let cmdstate_take_for_terminator
       ~(cc: arm_opcode_cc_t): cmd_t list * cmd_t list * cmd_t list =
   match cs.cs_open with
   | Some fr when fr.fr_key = key && cc = fr.fr_opencc ->
-     (cs.cs_flat, fr.fr_thenbucket, fr.fr_elsebucket)
+     let invlabel = get_invariant_label fr.fr_openerloc in
+     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
+     (cs.cs_flat @ [openerinvop], fr.fr_thenbucket, fr.fr_elsebucket)
   | Some fr when fr.fr_key = key && Some cc = get_inverse_cc fr.fr_opencc ->
-     (cs.cs_flat, fr.fr_elsebucket, fr.fr_thenbucket)
+     let invlabel = get_invariant_label fr.fr_openerloc in
+     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
+     (cs.cs_flat @ [openerinvop], fr.fr_elsebucket, fr.fr_thenbucket)
   | _ ->
      (cmdstate_finish cs, [], [])
 
@@ -710,6 +720,9 @@ let translate_arm_instruction
       (loc#i#add_int 8)#to_numerical in
   let pcassign = floc#get_assign_commands pcv (XConst (IntConst iaddr8)) in
 
+  let build_opener_unit newcmds =
+    frozenAsserts @ newcmds @ [bwdinvop] @ pcassign in
+
   let build_unit newcmds =
     frozenAsserts @ (invop :: newcmds) @ [bwdinvop] @ pcassign in
 
@@ -738,7 +751,6 @@ let translate_arm_instruction
             | _ -> default cmds)
          else
            let key = get_setter_key finfo testloc testinstr in
-           let unit_cmds = build_unit cmds in
            (* make_instr_local_tests must be called for every predicated
               instruction, not just the one that opens a fragment: besides
               returning the then/else test commands, arm_conditional_expr /
@@ -756,18 +768,40 @@ let translate_arm_instruction
                 fr.fr_key = key
                 && (c = fr.fr_opencc || get_inverse_cc fr.fr_opencc = Some c)
              | None -> false in
+           let fmem =
+             match cmdstate.cs_open with
+             | Some fr when already_open ->
+                {fmem_openerloc = fr.fr_openerloc;
+                 fmem_bucket = if c = fr.fr_opencc then FragThen else FragElse}
+             | _ ->
+                {fmem_openerloc = loc; fmem_bucket = FragThen} in
+           let _ = finfo#set_fragment_membership ctxtiaddr fmem in
            if already_open then
+             let unit_cmds = build_unit cmds in
              ([], [],
               cmdstate_append_predicated
-                cmdstate ~key ~cc:c ~thentest:[] ~elsetest:[] ~unit_cmds)
+                cmdstate
+                ~key
+                ~cc:c
+                ~openerloc:fmem.fmem_openerloc
+                ~thentest:[]
+                ~elsetest:[]
+                ~unit_cmds)
            else
+             let unit_cmds = build_opener_unit cmds in
              let (thentest, elsetest) =
                match tests with
                | Some (t, e) -> (t, e)
                | None -> ([], []) in
              ([], [],
-              cmdstate_append_predicated cmdstate
-                ~key ~cc:c ~thentest ~elsetest ~unit_cmds)
+              cmdstate_append_predicated
+                cmdstate
+                ~key
+                ~cc:c
+                ~openerloc:fmem.fmem_openerloc
+                ~thentest
+                ~elsetest
+                ~unit_cmds)
       | _ ->
          if has_false_condition_context ctxtiaddr then
            default []
@@ -1234,6 +1268,8 @@ let translate_arm_instruction
 
   | Branch (c, op, _)
     | BranchExchange (c, op) when is_cond_conditional c ->
+     let is_direct_branch =
+       match instr#get_opcode with Branch _ -> true | _ -> false in
      let thenaddr =
        if op#is_absolute_address then
          (make_i_location loc op#get_absolute_address)#ci
@@ -1259,9 +1295,14 @@ let translate_arm_instruction
          [] in
      let elseaddr = codepc#get_false_branch_successor in
      let (prefix_flat, thencode, elsecode) =
-       match get_setter_key_at finfo ctxtiaddr with
-       | Some (key, _, _) -> cmdstate_take_for_terminator cmdstate ~key ~cc:c
-       | _ -> (cmdstate_finish cmdstate, [], []) in
+       (* Don't merge fragment branch with CFG branch if this is an indirect
+          jump *)
+       if is_direct_branch then
+         match get_setter_key_at finfo ctxtiaddr with
+         | Some (key, _, _) -> cmdstate_take_for_terminator cmdstate ~key ~cc:c
+         | _ -> (cmdstate_finish cmdstate, [], [])
+       else
+         (cmdstate_finish cmdstate, [], []) in
      let cmds = prefix_flat @ [invop] @ defcmds @ [bwdinvop] in
      (* let cmds = cmds @ [invop] @ defcmds @ [bwdinvop] in *)
      let transaction = package_transaction finfo blocklabel cmds in

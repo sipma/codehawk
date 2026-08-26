@@ -679,12 +679,63 @@ object (self)
       match c with
       | ACCAlways -> ([tagstring], args)
       | _ when instr#is_condition_covered -> ([tagstring], args)
+      | c when is_cond_conditional c && floc#f#has_fragment_membership floc#cia ->
+         let csetter = floc#f#get_associated_cc_setter floc#cia in
+         let fm = floc#f#get_fragment_membership floc#cia in
+         let openerloc = fm.fmem_openerloc in
+         let openerfloc = get_floc openerloc in
+         let fmxpr = floc#f#get_test_expr openerloc#ci in
+         let txpr =
+           match fm.fmem_bucket with
+           | FragThen -> fmxpr
+           | FragElse -> simplify_xpr (XOp (XLNot, [fmxpr])) in
+         let fxpr = simplify_xpr (XOp (XLNot, [txpr])) in
+         let tcond = rewrite_floc_expr openerfloc txpr in
+         let fcond = rewrite_floc_expr openerfloc fxpr in
+         let ctcond_r = floc#xpr_to_cxpr ~size:(Some 4) tcond in
+         let cfcond_r = floc#xpr_to_cxpr ~size:(Some 4) fcond in
+         let rdefs = (get_all_rdefs txpr) @ (get_all_rdefs tcond) in
+         let argslen = List.length args in
+         let xtag = "xxcc" ^ (string_repeat "r" (List.length rdefs)) in
+         let xtag = tagstring ^ xtag in
+         let newargs = [
+             index_xpr (Ok tcond);
+             index_xpr (Ok fcond);
+             index_xpr ctcond_r;
+             index_xpr cfcond_r
+           ] @ rdefs in
+         let ictag = "ic:" ^ (string_of_int argslen) in
+         let icrtag = "icr:" ^ (string_of_int (argslen + 1)) in
+         let icctag = "icc:" ^ (string_of_int (argslen + 2)) in
+         let iccrtag = "iccr:" ^ (string_of_int (argslen + 3)) in
+         let icsetter = "icsetter:" ^ csetter in
+         let icopenerloc = "icopener:" ^ openerloc#ci in
+         let icbucket =
+           "icbucket:"
+           ^ (match fm.fmem_bucket with FragThen -> "then" | FragElse -> "else") in
+         let tags =
+           xtag
+           :: [ictag;
+               icrtag;
+               icctag;
+               iccrtag;
+               icsetter;
+               icbucket;
+               icopenerloc;] in
+         let args = args @ newargs in
+         (tags, args)
+
+      (* conditional that was not made part of a fragment *)
       | c when is_cond_conditional c && floc#has_test_expr ->
+         let _ =
+           log_diagnostics_result
+             ~tag:"add_optional_instr_condition:no fragment"
+             ~msg:(p2s floc#l#toPretty)
+             __FILE__ __LINE__
+             [p2s instr#toPretty] in
          let csetter = floc#f#get_associated_cc_setter floc#cia in
          let txpr = floc#get_test_expr in
          let fxpr = simplify_xpr (XOp (XLNot, [txpr])) in
-         (* we can rewrite with invariants at this address, since the expression
-            should have been made position independent for local variables.*)
          let tcond = rewrite_expr txpr in
          let fcond = rewrite_expr fxpr in
          let ctcond_r = floc#xpr_to_cxpr ~size:(Some 4) tcond in
@@ -707,6 +758,7 @@ object (self)
          let tags = xtag :: [ictag; icrtag; icctag; iccrtag; icsetter] in
          let args = args @ newargs in
          (tags, args)
+
       | _ -> (tagstring :: ["uc"], args) in
 
     let add_optional_subsumption (tags: string list): string list =
