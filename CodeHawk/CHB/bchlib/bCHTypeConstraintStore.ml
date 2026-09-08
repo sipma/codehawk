@@ -910,6 +910,7 @@ object (self)
                let ty = bcd#get_typ ixty in
                match ty with
                | TArray (TComp _, _, _) -> Some ty
+               | TComp _ -> Some ty
                | _ -> None) None in
       match optstructty with
       | None -> None
