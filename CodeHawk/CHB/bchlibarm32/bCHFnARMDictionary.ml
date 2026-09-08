@@ -687,11 +687,19 @@ object (self)
          let fmxpr = floc#f#get_test_expr openerloc#ci in
          let txpr =
            match fm.fmem_bucket with
-           | FragThen -> fmxpr
+           | FragThen -> simplify_xpr fmxpr
            | FragElse -> simplify_xpr (XOp (XLNot, [fmxpr])) in
          let fxpr = simplify_xpr (XOp (XLNot, [txpr])) in
          let tcond = rewrite_floc_expr openerfloc txpr in
          let fcond = rewrite_floc_expr openerfloc fxpr in
+         let _ =
+           log_diagnostics_result
+             ~tag:"add_optional_instr_condtiion"
+             ~msg:floc#cia
+             __FILE__ __LINE__
+             ["fmxpr: " ^ (x2s fmxpr);
+              "txpr: " ^ (x2s txpr);
+              "tcond: " ^ (x2s tcond)] in
          let ctcond_r = floc#xpr_to_cxpr ~size:(Some 4) tcond in
          let cfcond_r = floc#xpr_to_cxpr ~size:(Some 4) fcond in
          let rdefs = (get_all_rdefs txpr) @ (get_all_rdefs tcond) in
@@ -1766,6 +1774,42 @@ object (self)
              (BCH_failure
                 (LBLOCK [
                      STR "Aggregate branch not recognized at "; iaddr#toPretty]))
+
+      | Branch (c, tgt, _)
+           when is_cond_conditional c
+                && tgt#is_absolute_address
+                && floc#f#has_fragment_membership floc#cia ->
+         let xtgt_r = tgt#to_expr floc in
+         let fm = floc#f#get_fragment_membership floc#cia in
+         let openerloc = fm.fmem_openerloc in
+         let openerfloc = get_floc openerloc in
+         let fmxpr = floc#f#get_test_expr openerloc#ci in
+         let txpr =
+           match fm.fmem_bucket with
+           | FragThen -> simplify_xpr fmxpr
+           | FragElse -> simplify_xpr (XOp (XLNot, [fmxpr])) in
+         let fxpr = simplify_xpr (XOp (XLNot, [txpr])) in
+         let tcond = rewrite_floc_expr openerfloc txpr in
+         let fcond = rewrite_floc_expr openerfloc fxpr in
+         let ctcond_r = floc#xpr_to_cxpr ~size:(Some 4) tcond in
+         let cfcond_r = floc#xpr_to_cxpr ~size:(Some 4) fcond in
+         let csetter = floc#f#get_associated_cc_setter floc#cia in
+         let csetter_addr_r = string_to_doubleword csetter in
+         let csetter_instr_r =
+           TR.tbind get_arm_assembly_instruction csetter_addr_r in
+         let bytestr =
+           TR.tfold
+             ~ok:(fun instr -> instr#get_bytes_ashexstring)
+             ~error:(fun e ->
+               begin log_error_result __FILE__ __LINE__ e; "0x0" end)
+             csetter_instr_r in
+         let rdefs = (get_all_rdefs txpr) @ (get_all_rdefs tcond) in
+         let xprs_r = [Ok txpr; Ok fxpr; Ok tcond; Ok fcond; xtgt_r] in
+         let cxprs_r = [ctcond_r; cfcond_r] in
+         let (tagstring, args) = mk_instrx_data_r ~xprs_r ~cxprs_r ~rdefs () in
+         let (tags, args) = (tagstring :: ["TF"; csetter; bytestr], args) in
+         let tags = add_optional_subsumption tags in
+         (tags, args)
 
       | Branch (c, tgt, _)
            when is_cond_conditional c

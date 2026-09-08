@@ -112,6 +112,8 @@ module TR = CHTraceResult
 
 let x2p = xpr_formatter#pr_expr
 let max32_constant_expr = int_constant_expr e32
+let p2s = CHPrettyUtil.pretty_to_string
+let x2s x = p2s (x2p x)
 
 let tracked_locations = []
 
@@ -541,8 +543,12 @@ let arm_conditional_conditional_expr
      let xpr = XOp (XLOr, [XOp (XLAnd, [XOp (XLNot, [cond1]); cond3]);
                            XOp (XLAnd, [cond1; cond2])]) in
      begin
-       (if collect_diagnostics () then
-          ch_diagnostics_log#add "condition" (x2p xpr));
+       let _ =
+         log_diagnostics_result
+           ~tag:"arm_conditional_conditional_expr:set_test_expr"
+           ~msg:condfloc#l#ci
+           __FILE__ __LINE__
+           ["xpr set: " ^ (x2s xpr)] in
        condfloc#set_test_expr xpr;
        (frozenVars#toList, Some xpr, opsused)
      end
