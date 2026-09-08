@@ -310,6 +310,20 @@ object (self)
              && Option.is_none tgtsize
              && Option.is_none tgtbtype ->
          Ok NoOffset
+      | XConst (IntConst n) when
+             n#equal CHNumerical.numerical_zero
+             && Option.is_some tgtbtype
+             && is_struct_type (Option.get tgtbtype)
+             && is_struct_type btype ->
+         let tgttype = Option.get tgtbtype in
+         let cinfo1 = get_struct_type_compinfo tgttype in
+         let cinfo2 = get_struct_type_compinfo btype in
+         if cinfo1.bckey = cinfo2.bckey then
+           Ok NoOffset
+         else
+           Error [__FILE__ ^ ":" ^ (string_of_int __LINE__) ^ ": "
+                  ^ "cinfo1: " ^ cinfo1.bcname
+                  ^ "; cinfo2: " ^ cinfo2.bcname]
       | XConst (IntConst _) ->
          if is_struct_type btype then
            let compinfo = get_struct_type_compinfo btype in
