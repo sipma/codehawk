@@ -61,11 +61,11 @@ open BCHSystemInfo
 open BCHARMAssemblyInstructions
 open BCHARMCHIFSystem
 open BCHARMCodePC
-open BCHARMConditionalExpr
-open BCHARMDisassemblyUtils
 open BCHARMOpcodeRecords
 open BCHARMOperand
-open BCHARMTestSupport
+open BCHARMPredicatedFragment
+open BCHARMPredicateTest
+open BCHARMTranslationUtil
 open BCHARMTypes
 
 
@@ -83,586 +83,6 @@ let log_error (tag: string) (msg: string): tracelogspec_t =
 let valueset_domain = "valuesets"
 
 
-let make_code_label ?src ?modifier (address:ctxt_iaddress_t) =
-  let name =
-    if address = "exit" || address = "?" then
-      "exit"
-    else
-      "pc_" ^ address in
-  let atts = match modifier with
-    | Some s -> [s]
-    | _ -> [] in
-  let atts =
-    if address = "?" then
-      "unresolved-jump" :: atts
-    else
-      atts in
-  let atts = match src with
-    | Some s -> s#to_fixed_length_hex_string :: atts | _ -> atts in
-  ctxt_string_to_symbol name ~atts address
-
-
-let get_invariant_label ?(bwd=false) (loc:location_int) =
-  if bwd then
-    ctxt_string_to_symbol "bwd_invariant" loc#ci
-  else
-    ctxt_string_to_symbol "invariant" loc#ci
-
-
-let package_transaction
-      (finfo:function_info_int) (label:symbol_t) (cmds:cmd_t list) =
-  let cmds =
-    List.filter
-      (fun cmd -> match cmd with SKIP -> false | _ -> true) cmds in
-  let cnstAssigns = finfo#env#end_transaction in
-  TRANSACTION (label, LF.mkCode (cnstAssigns @ cmds), None)
-
-
-(* ------------------------------------------------------------------ cmdstate_t
-   Data structure and associated functions for the collection of commands inside
-   a basic block. The data structure allows for a refinement of the otherwise
-   linear sequence of commands, to enable a representation of predicated
-   instructions that result in increased precision of analysis results, due to
-   the collection of instructions with equal predicate in separate branches,
-   rather than having a single branch instruction per predicated instruction
-   with intervening joins.
- *)
-
-type setter_key_t = {
-    sk_testloc: ctxt_iaddress_t;
-    sk_testtestloc: ctxt_iaddress_t option
-  }
-
-type fragment_t = {
-    fr_key: setter_key_t;
-    fr_opencc: arm_opcode_cc_t;    (* the cc that defines "then" *)
-    fr_openerloc: location_int; (* location of first instr in fragment *)
-    fr_thenbucket: cmd_t list;  (* starts with thentest, grows by append *)
-    fr_elsebucket: cmd_t list   (* starts with elsetest *)
-  }
-
-type cmdstate_t = {
-    cs_flat: cmd_t list;           (* closed-out cmds, in order *)
-    cs_open: fragment_t option     (* at most one open fragement *)
-  }
-
-
-let get_setter_key
-      (finfo: function_info_int)
-      (testloc: location_int)
-      (testinstr: arm_assembly_instruction_int): setter_key_t =
-  let sk_testtestloc =
-    if is_opcode_conditional testinstr#get_opcode then
-      match get_associated_test_instr finfo testloc#ci with
-      | Some (testtestloc, _) -> Some testtestloc#ci
-      | None ->
-         let _ =
-           log_error_result
-             ~tag:"get_setter_key:Unable to get test-test-loc"
-             ~msg:testloc#ci
-             __FILE__ __LINE__
-             [testinstr#toString] in
-         None
-    else
-      None in
-  {sk_testloc = testloc#ci; sk_testtestloc}
-
-let get_setter_key_at
-      (finfo: function_info_int)
-      (ctxtiaddr: ctxt_iaddress_t)
-    : (setter_key_t * arm_assembly_instruction_int * location_int) option =
-  match get_associated_test_instr finfo ctxtiaddr with
-  | None -> None
-  | Some (testloc, testinstr) ->
-     Some (get_setter_key finfo testloc testinstr, testinstr, testloc)
-
-
-let cmdstate_start: cmdstate_t = {cs_flat = []; cs_open = None}
-
-(* Close cs_open (if any) into one BRANCH appended to cs_flat *)
-let cmdstate_flush (cs: cmdstate_t): cmdstate_t =
-  match cs.cs_open with
-  | None -> cs
-  | Some fr ->
-     let invlabel = get_invariant_label fr.fr_openerloc in
-     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
-     let branch =
-       BRANCH [LF.mkCode fr.fr_thenbucket; LF.mkCode fr.fr_elsebucket] in
-     {cs_flat = cs.cs_flat @ [openerinvop; branch]; cs_open = None}
-
-(* Extend cmdstate with the cmds for an unconditional / condition-covered
-   instruction: closes any open fragment, and appends the already wrapped
-   unit cmds *)
-let cmdstate_append_linear
-      (cs: cmdstate_t) (unit_cmds: cmd_t list): cmdstate_t =
-  let cs = cmdstate_flush cs in
-  {cs with cs_flat = cs.cs_flat @ unit_cmds}
-
-
-let cmdstate_append_predicated
-      (cs: cmdstate_t)
-      ~(key: setter_key_t)
-      ~(cc: arm_opcode_cc_t)
-      ~(openerloc: location_int)
-      ~(thentest: cmd_t list)
-      ~(elsetest: cmd_t list)
-      ~(unit_cmds: cmd_t list): cmdstate_t =
-  match cs.cs_open with
-  | Some fr when fr.fr_key = key && cc = fr.fr_opencc ->
-     {cs with cs_open =
-                Some {fr with fr_thenbucket = fr.fr_thenbucket @ unit_cmds}}
-  | Some fr when fr.fr_key = key && Some cc = get_inverse_cc fr.fr_opencc ->
-     {cs with cs_open =
-                Some {fr with fr_elsebucket = fr.fr_elsebucket @ unit_cmds}}
-  | _ ->
-     let cs = cmdstate_flush cs in
-     {cs with
-       cs_open =
-         Some {fr_key = key;
-               fr_opencc = cc;
-               fr_openerloc = openerloc;
-               fr_thenbucket = thentest @ unit_cmds;
-               fr_elsebucket = elsetest}}
-
-
-(* Block end (no terminating conditional branch): flush and linearlize for
-   package transaction *)
-let cmdstate_finish (cs: cmdstate_t): cmd_t list =
-  (cmdstate_flush cs).cs_flat
-
-
-(* Terminator hookup: if the terminator's own setter_key_t matches the still
-   open fragment, hand the fragment's buckets to make_condtiion instead of
-   flushing them into an intra-block BRANCH; otherwise close the branch first.*)
-let cmdstate_take_for_terminator
-      (cs: cmdstate_t)
-      ~(key: setter_key_t)
-      ~(cc: arm_opcode_cc_t): cmd_t list * cmd_t list * cmd_t list =
-  match cs.cs_open with
-  | Some fr when fr.fr_key = key && cc = fr.fr_opencc ->
-     let invlabel = get_invariant_label fr.fr_openerloc in
-     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
-     (cs.cs_flat @ [openerinvop], fr.fr_thenbucket, fr.fr_elsebucket)
-  | Some fr when fr.fr_key = key && Some cc = get_inverse_cc fr.fr_opencc ->
-     let invlabel = get_invariant_label fr.fr_openerloc in
-     let openerinvop = OPERATION {op_name = invlabel; op_args = []} in
-     (cs.cs_flat @ [openerinvop], fr.fr_elsebucket, fr.fr_thenbucket)
-  | _ ->
-     (cmdstate_finish cs, [], [])
-
-
-(* Returns the predicate instruction and associated info for a conditional,
-   in particular, it returns a tuple consisting of:
-   - a list of temporary variables created to preserve the (frozen) values
-     at the test location (testloc) for the location of the conditional (condloc)
-   - the predicate that expresses the joint condition of test and condition
-     code (cc, e.g., EQ), and
-   - a list of the operands used in the creation of the predicate
- *)
-let make_conditional_predicate
-      ~(condinstr: arm_assembly_instruction_int)
-      ~(testinstr: arm_assembly_instruction_int)
-      ~(condloc: location_int)
-      ~(testloc: location_int) =
-  let testfloc = get_floc testloc in
-  let get_default_conditional_expr () =
-    arm_conditional_expr
-      ~condopc:condinstr#get_opcode
-      ~testopc:testinstr#get_opcode
-      ~condloc:condloc
-      ~testloc:testloc in
-  if is_opcode_conditional testinstr#get_opcode then
-    let finfo = testfloc#f in
-    match get_associated_test_instr finfo testloc#ci with
-    | Some (testtestloc , testtestinstr) ->
-       arm_conditional_conditional_expr
-         ~condopc:condinstr#get_opcode
-         ~testopc:testinstr#get_opcode
-         ~testtestopc: testtestinstr#get_opcode
-         ~condloc
-         ~testloc
-         ~testtestloc
-    | _ ->
-       get_default_conditional_expr ()
-  else
-    get_default_conditional_expr ()
-
-
-let make_instr_local_tests
-    ~(condinstr:arm_assembly_instruction_int)
-    ~(testinstr:arm_assembly_instruction_int)
-    ~(condloc:location_int)
-    ~(testloc:location_int) =
-  let testfloc = get_floc testloc in
-  let condfloc = get_floc condloc in
-  let env = testfloc#f#env in
-  let reqN () = env#mk_num_temp in
-  let reqC i = env#request_num_constant i in
-  let get_default_conditional_expr () =
-    arm_conditional_expr
-      ~condopc:condinstr#get_opcode
-      ~testopc:testinstr#get_opcode
-      ~condloc
-      ~testloc in
-  let (frozenVars, optboolxpr, _) =
-    if is_opcode_conditional testinstr#get_opcode then
-      let finfo = testfloc#f in
-      match get_associated_test_instr finfo testloc#ci with
-      | Some (testtestloc, testtestinstr) ->
-         arm_conditional_conditional_expr
-           ~condopc:condinstr#get_opcode
-           ~testopc: testinstr#get_opcode
-           ~testtestopc: testtestinstr#get_opcode
-           ~condloc
-           ~testloc
-           ~testtestloc
-      | _ ->
-         get_default_conditional_expr ()
-    else
-      get_default_conditional_expr () in
-
-  let convert_to_chif expr =
-    let (cmds,bxpr) = xpr_to_boolexpr reqN reqC expr in
-    cmds @ [ASSERT bxpr] in
-  let convert_to_assert expr  =
-    let vars = variables_in_expr expr in
-    let varssize = List.length vars in
-    let xprs =
-      if varssize = 1 then
-	let var = List.hd vars in
-	let extxprs = condfloc#inv#get_external_exprs var in
-	let extxprs =
-          List.map (fun e -> substitute_expr (fun _ -> e) expr) extxprs in
-	expr :: extxprs
-      else if varssize = 2 then
-	let varlist = vars in
-	let var1 = List.nth varlist 0 in
-	let var2 = List.nth varlist 1 in
-	let extxprs1 = condfloc#inv#get_external_exprs var1 in
-	let extxprs2 = condfloc#inv#get_external_exprs var2 in
-	let xprs = List.concat
-	  (List.map
-	     (fun e1 ->
-	       List.map
-		 (fun e2 ->
-		   substitute_expr
-                     (fun w -> if w#equal var1 then e1 else e2) expr)
-		 extxprs2)
-	     extxprs1) in
-	expr :: xprs
-      else
-	[expr] in
-    List.concat (List.map convert_to_chif xprs) in
-  let make_asserts exprs =
-    List.concat (List.map convert_to_assert exprs) in
-  let make_branch_assert exprs =
-    let commands = List.map convert_to_assert exprs in
-    [BRANCH (List.map LF.mkCode commands)] in
-  let make_assert expr =
-    convert_to_assert expr in
-  let make_test_code expr =
-    if is_conjunction expr then
-      let conjuncts = get_conjuncts expr in
-      make_asserts conjuncts
-    else if is_disjunction expr then
-      let disjuncts = get_disjuncts expr in
-      make_branch_assert disjuncts
-    else
-      make_assert expr in
-  match optboolxpr with
-    Some bxpr ->
-      let thencode = make_test_code bxpr in
-      let elsecode = make_test_code (simplify_xpr (XOp (XLNot, [bxpr]))) in
-      (frozenVars, Some (thencode, elsecode))
-  | _ -> (frozenVars, None)
-
-
-let make_tests
-    ~(condinstr:arm_assembly_instruction_int)
-    ~(testinstr:arm_assembly_instruction_int)
-    ~(condloc:location_int)
-    ~(testloc:location_int) =
-  let testfloc = get_floc testloc in
-  let condfloc = get_floc condloc in
-  let env = testfloc#f#env in
-  let reqN () = env#mk_num_temp in
-  let reqC i = env#request_num_constant i in
-  let get_default_conditional_expr () =
-    arm_conditional_expr
-      ~condopc:condinstr#get_opcode
-      ~testopc:testinstr#get_opcode
-      ~condloc
-      ~testloc in
-  let (frozenVars, optboolxpr, _) =
-    if is_opcode_conditional testinstr#get_opcode then
-      let finfo = testfloc#f in
-      match get_associated_test_instr finfo testloc#ci with
-      | Some (testtestloc, testtestinstr) ->
-        arm_conditional_conditional_expr
-          ~condopc:condinstr#get_opcode
-          ~testopc: testinstr#get_opcode
-          ~testtestopc: testtestinstr#get_opcode
-          ~condloc
-          ~testloc
-          ~testtestloc
-      | _ ->
-         get_default_conditional_expr ()
-    else
-      get_default_conditional_expr () in
-
-  let _ =
-    if testsupport#requested_arm_conditional_expr then
-      testsupport#submit_arm_conditional_expr condinstr testinstr optboolxpr in
-
-  let convert_to_chif ?(high=true) expr =
-    let vars = variables_in_expr expr in
-    let varscmds =
-      if high then
-        condfloc#get_vardef_commands ~usehigh:vars condloc#ci
-      else
-        condfloc#get_vardef_commands ~use:vars condloc#ci in
-    let (cmds, bxpr) = xpr_to_boolexpr reqN reqC expr in
-    cmds @ varscmds @ [ASSERT bxpr] in
-  let convert_to_assert expr  =
-    let vars = variables_in_expr expr in
-    let varssize = List.length vars in
-    let xprs =
-      if varssize = 1 then
-	let var = List.hd vars in
-	let extxprs = condfloc#inv#get_external_exprs var in
-	let extxprs =
-          List.map (fun e -> substitute_expr (fun _ -> e) expr) extxprs in
-        match extxprs with
-        | [] -> [expr]
-        | _ -> extxprs
-      else if varssize = 2 then
-	let varlist = vars in
-	let var1 = List.nth varlist 0 in
-	let var2 = List.nth varlist 1 in
-	let extxprs1 = condfloc#inv#get_external_exprs var1 in
-	let extxprs2 = condfloc#inv#get_external_exprs var2 in
-	let xprs = List.concat
-	  (List.map
-	     (fun e1 ->
-	       List.map
-		 (fun e2 ->
-		   substitute_expr
-                     (fun w -> if w#equal var1 then e1 else e2) expr)
-		 extxprs2)
-	     extxprs1) in
-	expr :: xprs
-      else
-	[expr] in
-    let _ =
-      if testsupport#requested_chif_conditionxprs then
-        testsupport#submit_chif_conditionxprs condinstr testinstr xprs in
-    let basic_asserts = convert_to_chif ~high:false (List.hd xprs) in
-    let rewritten_asserts = List.concat (List.map convert_to_chif (List.tl xprs)) in
-    basic_asserts @ rewritten_asserts in
-
-  let make_asserts exprs =
-    let _ = env#start_transaction in
-    let commands = List.concat (List.map convert_to_assert exprs) in
-    let const_assigns = env#end_transaction in
-    const_assigns @ commands in
-  let make_branch_assert exprs =
-    let _ = env#start_transaction in
-    let commands = List.map convert_to_assert exprs in
-    let branch = BRANCH (List.map LF.mkCode commands) in
-    let const_assigns = env#end_transaction in
-    const_assigns @ [branch] in
-  let make_assert expr =
-    let _ = env#start_transaction in
-    let commands = convert_to_assert expr in
-    let const_assigns = env#end_transaction in
-    const_assigns @ commands in
-  let make_test_code expr =
-    if is_conjunction expr then
-      let conjuncts = get_conjuncts expr in
-      make_asserts conjuncts
-    else if is_disjunction expr then
-      let disjuncts = get_disjuncts expr in
-      make_branch_assert disjuncts
-    else
-      make_assert expr in
-  match optboolxpr with
-    Some bxpr ->
-      let thencode = make_test_code bxpr in
-      let elsecode = make_test_code (simplify_xpr (XOp (XLNot, [bxpr]))) in
-      (frozenVars, Some (thencode, elsecode))
-  | _ -> (frozenVars, None)
-
-
-(* Returns the CHIF code for a conditional branch instruction that
-   incorporates the full condition as part of the instruction (i.e. no
-   dependency on a separate test instruction), such as CBZ or CBNZ.
-
-   The CHIF code consists of a tuple of two sequences of CHIF commands.
-   The first sequence is the CHIF for the then test, the second sequence
-   is the CHIF for the else test.
-
-   If the condition cannot be converted to CHIF SKIP commands are
-   returned, that is, the conditional branch is effectively turned into
-   a nondeterminstic branch.
- *)
-let make_local_tests
-      (condinstr: arm_assembly_instruction_int)
-      (condloc: location_int): (cmd_t list * cmd_t list) =
-  let floc = get_floc condloc in
-  let env = floc#f#env in
-  let reqN () = env#mk_num_temp in
-  let reqC i = env#request_num_constant i in
-  let boolxpr_r =
-    match condinstr#get_opcode with
-    | CompareBranchZero (op, _) ->
-       TR.tmap
-         ~msg:(__FILE__ ^ ":" ^ (string_of_int __LINE__))
-         (fun x -> XOp (XEq, [x; zero_constant_expr]))
-         (op#to_expr floc)
-    | CompareBranchNonzero (op, _) ->
-       TR.tmap
-         ~msg:(__FILE__ ^ ":" ^ (string_of_int __LINE__))
-         (fun x -> XOp (XNe, [x; zero_constant_expr]))
-         (op#to_expr floc)
-    | _ ->
-       Error [__FILE__ ^ ":" ^ (string_of_int __LINE__) ^ ": "
-              ^ "Unexpected condition: " ^ (p2s condinstr#toPretty)] in
-
-  let convert_to_chif expr =
-    let vars = variables_in_expr expr in
-    let defcmds = floc#get_vardef_commands ~usehigh:vars floc#l#ci in
-    let (cmds, bxpr) = xpr_to_boolexpr reqN reqC expr in
-    cmds @ defcmds @ [ASSERT bxpr] in
-  let make_assert x =
-    let _ = env#start_transaction in
-    let commands = convert_to_chif x in
-    let const_assigns = env#end_transaction in
-    const_assigns @ commands in
-  TR.tfold
-    ~ok:(fun boolxpr ->
-      let thencode = make_assert boolxpr in
-      let elsecode = make_assert (simplify_xpr (XOp (XLNot, [boolxpr]))) in
-      (thencode, elsecode))
-    ~error:(fun e ->
-      begin
-        log_error_result __FILE__ __LINE__ e;
-        ([SKIP], [SKIP])
-      end)
-    boolxpr_r
-
-
-(* Returns the control-flow graph nodes and edges of a conditional branch
-   instruction that incorporates the full condition as part of the instruction
-   (i.e., no dependency on a separate test instruction), such as CBZ
-   (CompareBranchZero) or CBNZ)
-
-   Two cfg nodes are created: a 'then' node with the then-test and an 'else'
-   node with the else-test. Four cfg edges are created: (1) from block label
-   to thennode, (2) from block label to elsenode, (3) from thennode to the
-   cfg target jump address, and (4) from elsenode to the cfg fall-through
-   address.
- *)
-let make_local_condition
-      (condinstr: arm_assembly_instruction_int)
-      (condloc: location_int)
-      (blocklabel: symbol_t)
-      (thenaddr: ctxt_iaddress_t)
-      (elseaddr: ctxt_iaddress_t) =
-  let thenlabel = make_code_label thenaddr in
-  let elselabel = make_code_label elseaddr in
-  let (thentest, elsetest) = make_local_tests condinstr condloc in
-  let make_node_and_label testcode tgtaddr modifier =
-    let src = condloc#i in
-    let nextlabel = make_code_label ~src ~modifier tgtaddr in
-    let transaction = TRANSACTION (nextlabel, LF.mkCode testcode, None) in
-    (nextlabel, [transaction]) in
-  let (thentestlabel, thennode) =
-    make_node_and_label thentest thenaddr "then" in
-  let (elsetestlabel, elsenode) =
-    make_node_and_label elsetest elseaddr "else" in
-  let thenedges =
-    [(blocklabel, thentestlabel); (thentestlabel, thenlabel)] in
-  let elseedges =
-    [(blocklabel, elsetestlabel); (elsetestlabel, elselabel) ] in
-  ([(thentestlabel, thennode); (elsetestlabel, elsenode)], thenedges @ elseedges)
-
-
-(* Returns the control-flow graph nodes and edges of a conditional branch or an
-   IfThen instruction that is handled with full control flow rather than with an
-   aggregate. It applies to conditional branches in which the test is performed
-   by a separate instruction (the test instruction) and the branch condition
-   is determined by the combination of the test instruction and the condition
-   code that is part of the branch instruction (or IfThen).
-
-   If a conditional predicate for the branch can be synthesized and converted into
-   CHIF, a 'then node' with the then-test and an 'else node' with the else-test
-   are created. In both nodes the temporary variables that were created to carry
-   the frozen values are abstracted to avoid unnecessary propagation of variables
-   that will never be used again. Four edges are created: (1) from block-label
-   to thenblock, (2) from thenblock to the cfg target jump address, (3) from
-   block-label to elseblock, and (4) from elseblock to the cfg fall-through
-   instruction.
-
-   If a conditional predicate for the branch cannot be constructed the control flow
-   components created represent a non-deterministic branch. One node is
-   constructed, to abstract the temporary variables created by the attempt to
-   create a condition. Three edges are created: (1) from block-label to the new
-   node, (2) from the new node to the cfg target jump address, and (3) from the new
-   node to the cfg fall-through instruction.
-*)
-let make_condition
-      ?(thencode: cmd_t list = [])
-      ?(elsecode: cmd_t list = [])
-    ~(condinstr:arm_assembly_instruction_int)
-    ~(testinstr:arm_assembly_instruction_int)
-    ~(condloc:location_int)
-    ~(testloc:location_int)
-    ~(blocklabel:symbol_t)
-    ~(thenaddr:ctxt_iaddress_t)
-    ~(elseaddr:ctxt_iaddress_t)
-    () =
-  let thenlabel = make_code_label thenaddr in
-  let elselabel = make_code_label elseaddr in
-  let (frozenVars, tests) =
-    make_tests ~condloc ~testloc ~condinstr ~testinstr in
-  match tests with
-    Some (thentest, elsetest) ->
-      let make_node_and_label testcode tgtaddr modifier =
-	let src = condloc#i in
-	let nextlabel = make_code_label ~src ~modifier tgtaddr in
-	let testcode =
-          testcode
-          @ (match frozenVars with
-             | [] -> []
-             | _ -> [ABSTRACT_VARS frozenVars]) in
-	let transaction = TRANSACTION (nextlabel, LF.mkCode testcode, None) in
-	(nextlabel, [transaction]) in
-      let (thentestlabel, thennode) =
-	make_node_and_label (thencode @ thentest) thenaddr "then" in
-      let (elsetestlabel, elsenode) =
-	make_node_and_label (elsecode @ elsetest) elseaddr "else" in
-      let thenedges =
-	[(blocklabel, thentestlabel); (thentestlabel, thenlabel)] in
-      let elseedges =
-	[(blocklabel, elsetestlabel); (elsetestlabel, elselabel) ] in
-      ([(thentestlabel, thennode); (elsetestlabel, elsenode)],
-       thenedges @ elseedges)
-  | _ ->
-     let abstractlabel =
-       make_code_label ~modifier:"abstract" testloc#ci in
-     let trcode =
-       match frozenVars with
-       | [] -> [SKIP]
-       | _ -> [ABSTRACT_VARS frozenVars] in
-     let transaction =
-       TRANSACTION (abstractlabel, LF.mkCode trcode, None) in
-     let edges = [
-         (blocklabel, abstractlabel);
-         (abstractlabel, thenlabel);
-	 (abstractlabel, elselabel)] in
-     ([(abstractlabel, [transaction])], edges)
-
-
 let translate_arm_instruction
       ~(funloc:location_int)
       ~(codepc:arm_code_pc_int)
@@ -676,9 +96,6 @@ let translate_arm_instruction
   let invop = OPERATION {op_name = invlabel; op_args = []} in
   let bwdinvlabel = get_invariant_label ~bwd:true loc in
   let bwdinvop = OPERATION {op_name = bwdinvlabel; op_args = []} in
-  let frozenAsserts =
-    List.map (fun (v,fv) -> ASSERT (EQ (v, fv)))
-      (finfo#get_test_variables ctxtiaddr) in
   let rewrite_expr (floc: floc_int) (x:xpr_t): xpr_t =
     let xpr = floc#inv#rewrite_expr x in
     let rec expand x =
@@ -720,95 +137,17 @@ let translate_arm_instruction
       (loc#i#add_int 8)#to_numerical in
   let pcassign = floc#get_assign_commands pcv (XConst (IntConst iaddr8)) in
 
-  let build_opener_unit newcmds =
-    frozenAsserts @ newcmds @ [bwdinvop] @ pcassign in
-
-  let build_unit newcmds =
-    frozenAsserts @ (invop :: newcmds) @ [bwdinvop] @ pcassign in
+  let build_unit newcmds = newcmds @ [bwdinvop] @ pcassign in
 
   let default newcmds =
-    ([], [], cmdstate_append_linear cmdstate (build_unit newcmds)) in
+    let asserts = get_frozen_asserts finfo loc#ci in
+    let invop = get_invariant_operation loc in
+    let newcmds = asserts @ (invop :: (build_unit newcmds)) in
+    ([], [], cmdstate_append_linear finfo cmdstate newcmds) in
 
   let make_conditional_commands (c: arm_opcode_cc_t) (cmds: cmd_t list) =
-    if instr#is_condition_covered then
-      default cmds
-    else
-      match get_associated_test_instr finfo ctxtiaddr with
-      | Some (testloc, testinstr) ->
-         if has_false_condition_context ctxtiaddr then
-           let (_, tests) =
-             make_instr_local_tests
-               ~condloc:loc ~testloc ~condinstr:instr ~testinstr in
-           (match tests with
-            | Some (_, elsetest) -> default elsetest
-            | _ -> default [])
-         else if has_true_condition_context ctxtiaddr then
-           let (_, tests) =
-             make_instr_local_tests
-               ~condloc:loc ~testloc ~condinstr:instr ~testinstr in
-           (match tests with
-            | Some (thentest, _) -> default (thentest @ cmds)
-            | _ -> default cmds)
-         else
-           let key = get_setter_key finfo testloc testinstr in
-           (* make_instr_local_tests must be called for every predicated
-              instruction, not just the one that opens a fragment: besides
-              returning the then/else test commands, arm_conditional_expr /
-              arm_conditional_conditional_expr has the side effect of
-              registering condfloc#set_test_expr for this instruction's own
-              location, which bCHFnARMDictionary.ml's xdata generation and
-              bCHFnARMTypeConstraints.ml's type-constraint generation both
-              depend on per-instruction. *)
-           let (_, tests) =
-             make_instr_local_tests
-               ~condloc:loc ~testloc ~condinstr:instr ~testinstr in
-           let already_open =
-             match cmdstate.cs_open with
-             | Some fr ->
-                fr.fr_key = key
-                && (c = fr.fr_opencc || get_inverse_cc fr.fr_opencc = Some c)
-             | None -> false in
-           let fmem =
-             match cmdstate.cs_open with
-             | Some fr when already_open ->
-                {fmem_openerloc = fr.fr_openerloc;
-                 fmem_bucket = if c = fr.fr_opencc then FragThen else FragElse}
-             | _ ->
-                {fmem_openerloc = loc; fmem_bucket = FragThen} in
-           let _ = finfo#set_fragment_membership ctxtiaddr fmem in
-           if already_open then
-             let unit_cmds = build_unit cmds in
-             ([], [],
-              cmdstate_append_predicated
-                cmdstate
-                ~key
-                ~cc:c
-                ~openerloc:fmem.fmem_openerloc
-                ~thentest:[]
-                ~elsetest:[]
-                ~unit_cmds)
-           else
-             let unit_cmds = build_opener_unit cmds in
-             let (thentest, elsetest) =
-               match tests with
-               | Some (t, e) -> (t, e)
-               | None -> ([], []) in
-             ([], [],
-              cmdstate_append_predicated
-                cmdstate
-                ~key
-                ~cc:c
-                ~openerloc:fmem.fmem_openerloc
-                ~thentest
-                ~elsetest
-                ~unit_cmds)
-      | _ ->
-         if has_false_condition_context ctxtiaddr then
-           default []
-         else if has_true_condition_context ctxtiaddr then
-           default cmds
-         else
-           default [BRANCH [LF.mkCode cmds; LF.mkCode[SKIP]]] in
+    ([], [],
+     append_predicated_instruction finfo cmdstate ~instr ~loc ~cc:c ~build_unit ~cmds) in
 
   let get_register_vars (ops: arm_operand_int list) =
     List.fold_left (fun acc op ->
@@ -1299,13 +638,19 @@ let translate_arm_instruction
           jump *)
        if is_direct_branch then
          match get_setter_key_at finfo ctxtiaddr with
-         | Some (key, _, _) -> cmdstate_take_for_terminator cmdstate ~key ~cc:c
-         | _ -> (cmdstate_finish cmdstate, [], [])
+         | Some (key, _, _) ->
+            cmdstate_take_for_terminator finfo cmdstate ~key ~cc:c
+         | _ ->
+            (cmdstate_finish finfo cmdstate, [], [])
        else
-         (cmdstate_finish cmdstate, [], []) in
+         (cmdstate_finish finfo cmdstate, [], []) in
      let cmds = prefix_flat @ [invop] @ defcmds @ [bwdinvop] in
-     (* let cmds = cmds @ [invop] @ defcmds @ [bwdinvop] in *)
-     let transaction = package_transaction finfo blocklabel cmds in
+     let (transaction, thenbucket, elsebucket) =
+       match (thencode, elsecode) with
+       | ([], []) ->
+          (package_transaction finfo blocklabel cmds, None, None)
+       | _ ->
+          package_terminator_transactions finfo blocklabel cmds thencode elsecode in
      if finfo#has_associated_cc_setter ctxtiaddr then
        let testiaddr = finfo#get_associated_cc_setter ctxtiaddr in
        let testloc = ctxt_string_to_location faddr testiaddr in
@@ -1317,8 +662,8 @@ let translate_arm_instruction
            (get_arm_assembly_instruction testaddr) in
        let (nodes, edges) =
          make_condition
-           ~thencode
-           ~elsecode
+           ?thencode:thenbucket
+           ?elsecode:elsebucket
            ~condinstr:instr
            ~testinstr:testinstr
            ~condloc:loc
@@ -1349,7 +694,7 @@ let translate_arm_instruction
            end)
          (op#to_expr floc) in
      let defcmds = floc#get_vardef_commands ~use:usevars ~usehigh ctxtiaddr in
-     let cmds = (cmdstate_finish cmdstate) @ defcmds @ [invop] in
+     let cmds = (cmdstate_finish finfo cmdstate) @ defcmds @ [invop] in
      let transaction = package_transaction finfo blocklabel cmds in
      let (nodes, edges) =
        make_local_condition instr loc blocklabel thenaddr elseaddr in
@@ -2019,7 +1364,7 @@ let translate_arm_instruction
   | IfThen _ when instr#is_block_condition ->
      let thenaddr = codepc#get_true_branch_successor in
      let elseaddr = codepc#get_false_branch_successor in
-     let cmds = (cmdstate_finish cmdstate) @ [invop] in
+     let cmds = (cmdstate_finish finfo cmdstate) @ [invop] in
      let transaction = package_transaction finfo blocklabel cmds in
      (match get_associated_test_instr finfo ctxtiaddr with
       | Some (testloc, testinstr) ->
@@ -3122,15 +2467,16 @@ let translate_arm_instruction
 
        (* collect all previous commands in the block and the invariant anchor
           and package them together with the vardef commands in a transaction *)
-       let cmds = (cmdstate_finish cmdstate) @ (invop :: ccvardefs) in
-       let transaction = package_transaction finfo blocklabel cmds in
+       let cmds = (cmdstate_finish finfo cmdstate) @ (invop :: ccvardefs) in
+       let (transaction, thencode, _) =
+         package_terminator_transactions finfo blocklabel cmds (popcmds ()) [] in
 
        (* create the branches according to the condition *)
        (match get_associated_test_instr finfo ctxtiaddr with
         | Some (testloc, testinstr) ->
            let (nodes, edges) =
              make_condition
-               ~thencode:(popcmds ())
+               ?thencode
                ~condinstr:instr
                ~testinstr:testinstr
                ~condloc:loc
@@ -5190,7 +4536,7 @@ object (self)
            aux newcmdstate
          else
            let transaction =
-             package_transaction finfo blocklabel (cmdstate_finish newcmdstate) in
+             package_transaction finfo blocklabel (cmdstate_finish finfo newcmdstate) in
            let nodes = [(blocklabel, [transaction])] in
            let edges =
              List.map
@@ -5452,7 +4798,7 @@ object (self)
     let cfg = codegraph#to_cfg entryLabel exitLabel in
     let body = LF.mkCode [CFG (procname, cfg)] in
     let proc = LF.mkProcedure procname ~signature:[] ~bindings:[] ~scope ~body in
-    (* let _ = pr_debug [proc#toPretty; NL] in *)
+    let _ = pr_debug [proc#toPretty; NL] in
     arm_chif_system#add_arm_procedure proc
 
 end

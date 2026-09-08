@@ -33,26 +33,8 @@ open CHOnlineCodeSet
 open BCHLibTypes
 
 (* bchlibarm32 *)
+open BCHARMPredicatedFragment
 open BCHARMTypes
-
-
-type setter_key_t = {
-    sk_testloc: ctxt_iaddress_t;
-    sk_testtestloc: ctxt_iaddress_t option
-  }
-
-type fragment_t = {
-    fr_key: setter_key_t;
-    fr_opencc: arm_opcode_cc_t;    (* the cc that defines "then" *)
-    fr_openerloc: location_int; (* location of first instr in fragment *)
-    fr_thenbucket: cmd_t list;  (* starts with thentest, grows by append *)
-    fr_elsebucket: cmd_t list   (* starts with elsetest *)
-  }
-
-type cmdstate_t = {
-    cs_flat: cmd_t list;           (* closed-out cmds, in order *)
-    cs_open: fragment_t option     (* at most one open fragement *)
-  }
 
 
 val translate_arm_instruction:
@@ -61,7 +43,7 @@ val translate_arm_instruction:
   -> blocklabel:symbol_t
   -> cmdstate:cmdstate_t
   -> ((symbol_t
-       * (code_t, 'a) command_t list) list
+       * (code_t, cfg_int) command_t list) list
       * (symbol_t * symbol_t) list
       * cmdstate_t)
 
