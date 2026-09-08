@@ -1143,6 +1143,9 @@ and reduce_or m e1 e2 =
 	  XOp (XSubset, [ _s ; _t ]))
 	    when (is_zero y) ->
 	  (true, XOp (XLe, [ x ; z]))
+       | (XOp (XNe, [x1; y1]), XOp (XEq, [x2; y2]))
+            when syntactically_equal x1 x2 && syntactically_equal y1 y2 ->
+          (true, true_constant_expr)
        | _ ->
 	  default
 
@@ -1201,7 +1204,9 @@ and reduce_and m e1 e2 =
     | (XOp (XEq, [x1; y1]), XOp (XNe, [x2; y2]))
          when syntactically_equal x1 x2 && syntactically_equal y1 y2 ->
        (true, false_constant_expr)
-
+    | (XOp (XNe, [x1; y1]), XOp (XEq, [x2; y2]))
+         when syntactically_equal x1 x2 && syntactically_equal y1 y2 ->
+       (true, false_constant_expr)
     | _ ->
        default
 
