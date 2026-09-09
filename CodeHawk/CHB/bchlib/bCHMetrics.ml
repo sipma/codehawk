@@ -31,6 +31,7 @@
 open CHPretty
 
 (* chutil *)
+open CHLogger
 open CHXmlDocument
 
 (* bchlib *)
@@ -97,10 +98,22 @@ let get_jumps_metrics (finfo:function_info_int) =
   let norange =
     List.fold_left
       (fun acc ctxtiaddr ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
-        let floc = get_floc loc in
-        match floc#get_jump_successors with
-        | [] -> acc + 1 | _ -> acc) 0 jts in
+        TR.tfold
+          ~ok:(fun loc ->
+            let floc = get_floc loc in
+            match floc#get_jump_successors with
+            | [] -> acc + 1
+            | _ -> acc)
+          ~error:(fun e ->
+            begin
+              log_error_result
+                ~tag:"get_jumps_metrics"
+                ~msg:faddr#to_hex_string
+                __FILE__ __LINE__ e;
+              acc
+            end)
+          (ctxt_string_to_location faddr ctxtiaddr))
+      0 jts in
   { mjumps_indirect = finfo#get_indirect_jumps_count ;
     mjumps_jumptable = finfo#get_jumptable_count ;
     mjumps_jumptable_norange = norange ;

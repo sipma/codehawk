@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2024-2025  Aarno Labs LLC
+   Copyright (c) 2024-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -793,14 +793,24 @@ object (self)
            (btype: btype_t) =
     match self#xpr_containing_location gxpr with
     | Some gloc ->
-       let loc = BCHLocation.ctxt_string_to_location faddr iaddr in
-       let memoff = TR.to_option (gloc#address_memory_offset loc gxpr) in
-       let garg =
-         GAddressArgument (gloc#address, iaddr, argindex, gxpr, btype, memoff) in
-       begin
-         self#add_global_ref faddr garg;
-         Some gloc
-       end
+       TR.tfold
+         ~ok:(fun loc ->
+           let memoff = TR.to_option (gloc#address_memory_offset loc gxpr) in
+           let garg =
+             GAddressArgument (gloc#address, iaddr, argindex, gxpr, btype, memoff) in
+           begin
+             self#add_global_ref faddr garg;
+             Some gloc
+           end)
+         ~error:(fun e ->
+           begin
+             log_error_result
+               ~tag:"add_gaddr_argument"
+               ~msg:iaddr
+               __FILE__ __LINE__ e;
+             None
+           end)
+         (BCHLocation.ctxt_string_to_location faddr iaddr)
     | _ ->
        (match gxpr with
         | XConst (IntConst n) ->

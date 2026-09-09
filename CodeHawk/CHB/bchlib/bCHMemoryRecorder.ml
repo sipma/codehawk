@@ -91,7 +91,7 @@ object (self)
 
   method iaddr = iaddr
 
-  method private loc: location_int =
+  method private loc: location_int traceresult =
     ctxt_string_to_location self#faddr self#iaddr
 
   method private get_gvalue (x: xpr_t) =
@@ -100,11 +100,21 @@ object (self)
     | XVar v when self#env#is_return_value v ->
        TR.tfold
          ~ok:(fun callSite ->
-           GReturnValue (ctxt_string_to_location self#faddr callSite))
+           TR.tfold
+             ~ok:(fun callsiteloc -> GReturnValue callsiteloc)
+             ~error:(fun e ->
+               begin
+                 log_dc_error_result
+                   ~tag:"get_gvalue"
+                   __FILE__ __LINE__
+                   (("x: " ^ (x2s x)) :: e);
+                 GUnknownValue
+               end)
+              (ctxt_string_to_location self#faddr callSite))
          ~error:(fun e ->
            begin
              log_diagnostics_result
-               ~msg:(p2s self#loc#toPretty)
+               ~msg:iaddr
                ~tag:"memrecorder:get_gvalue"
                __FILE__ __LINE__ (e @ ["invalid callsite"]);
              GUnknownValue
@@ -112,24 +122,33 @@ object (self)
          (self#env#get_call_site v)
     | XVar v when self#env#is_sideeffect_value v ->
        TR.tfold
-         ~ok: (fun callSite ->
+         ~ok:(fun callSite ->
            TR.tfold
-             ~ok:(fun argdescr ->
-               GSideeffectValue
-                 (ctxt_string_to_location self#faddr callSite, argdescr))
+             ~ok:(fun callsiteloc ->
+               TR.tfold
+                 ~ok:(fun argdescr -> GSideeffectValue (callsiteloc, argdescr))
+                 ~error:(fun e ->
+                   begin
+                     log_diagnostics_result
+                       ~msg:iaddr
+                       ~tag:"memrecorder:get_gvalue"
+                       __FILE__ __LINE__ (e @ ["invalide side-effect descriptor"]);
+                     GUnknownValue
+                   end)
+                 (self#env#get_se_argument_descriptor v))
              ~error:(fun e ->
                begin
-                 log_diagnostics_result
-                   ~msg:(p2s self#loc#toPretty)
-                   ~tag:"memrecorder:get_gvalue"
-                   __FILE__ __LINE__ (e @ ["invalide side-effect descriptor"]);
+                 log_dc_error_result
+                   ~tag:"get_gvalue"
+                   __FILE__ __LINE__
+                   (("x: " ^ (x2s x)) :: e);
                  GUnknownValue
                end)
-             (self#env#get_se_argument_descriptor v))
+             (ctxt_string_to_location self#faddr callSite))
          ~error:(fun e ->
            begin
              log_diagnostics_result
-               ~msg:(p2s self#loc#toPretty)
+               ~msg:iaddr
                ~tag:"memrecorder:get_gvalue"
                __FILE__ __LINE__ (e @ ["invalide side-effect value"]);
              GUnknownValue
@@ -172,12 +191,20 @@ object (self)
        && (self#env#has_global_variable_address lhs) then
       TR.tfold
         ~ok:(fun gaddr ->
-          global_system_state#add_writer
-            ~ty:vtype ~size (self#get_gvalue rhs) gaddr self#loc)
+          TR.tfold
+             ~ok:(fun loc ->
+               global_system_state#add_writer
+                 ~ty:vtype ~size (self#get_gvalue rhs) gaddr loc)
+             ~error:(fun e ->
+               log_error_result
+                 ~tag:"record_assignment_lhs"
+                 ~msg:iaddr
+                 __FILE__ __LINE__ e)
+             self#loc)
         ~error:(fun e ->
           log_error_result
             ~tag:"record_assignment_lhs"
-            ~msg:(p2s self#loc#toPretty)
+            ~msg:iaddr
             __FILE__ __LINE__
             (["invalid global address for: " ^ (p2s lhs#toPretty)] @ e))
         (self#env#get_global_variable_address lhs)
@@ -197,21 +224,21 @@ object (self)
           | _ ->
              log_diagnostics_result
                ~tag:"record_assignment_lhs"
-               ~msg:(p2s self#loc#toPretty)
+               ~msg:iaddr
                __FILE__ __LINE__
                ["stack assignment lhs not recorded";
                 "lhs: " ^ (p2s lhs#toPretty)])
         ~error:(fun e ->
           log_error_result
             ~tag:"record_assignment_lhs"
-            ~msg:(p2s self#loc#toPretty)
+            ~msg:iaddr
             __FILE__ __LINE__
             (["invalid offset for: " ^ (p2s lhs#toPretty)] @ e))
         (self#env#get_memvar_offset lhs)
     else
       log_diagnostics_result
         ~tag:"record_assignment_lhs"
-        ~msg:(p2s self#loc#toPretty)
+        ~msg:iaddr
         __FILE__ __LINE__
         ["assignment lhs not recorded";
          "lhs: " ^ (p2s lhs#toPretty);
@@ -225,11 +252,19 @@ object (self)
            && (self#env#has_global_variable_address v) then
           TR.tfold
             ~ok:(fun gaddr ->
-              global_system_state#add_reader ~ty:vtype ~size gaddr self#loc)
+              TR.tfold
+                ~ok:(fun loc ->
+                  global_system_state#add_reader ~ty:vtype ~size gaddr loc)
+                ~error:(fun e ->
+                  log_error_result
+                    ~tag:"record_assignment_rhs"
+                    ~msg:iaddr
+                    __FILE__ __LINE__ e)
+                self#loc)
             ~error:(fun e ->
               log_error_result
                 ~tag:"record_assignment_rhs"
-                ~msg:(p2s self#loc#toPretty)
+                ~msg:iaddr
                 __FILE__ __LINE__
                 (["invalid global address for: " ^ (x2s rhs)] @ e))
             (self#env#get_global_variable_address v)
@@ -248,7 +283,7 @@ object (self)
               | _ ->
                  log_diagnostics_result
                    ~tag:"record_assignment_rhs"
-                   ~msg:(p2s self#loc#toPretty)
+                   ~msg:iaddr
                    __FILE__ __LINE__
                    ["stack assignment rhs not recorded";
                     "v: " ^ (p2s v#toPretty);
@@ -256,14 +291,14 @@ object (self)
             ~error:(fun e ->
               log_error_result
                 ~tag:"record_assignment_rhs"
-                ~msg:(p2s self#loc#toPretty)
+                ~msg:iaddr
                 __FILE__ __LINE__
                 (["invalid offset for: " ^ (x2s rhs)] @ e))
             (self#env#get_memvar_offset v)
         else
           log_diagnostics_result
             ~tag:"record_assignment_rhs"
-            ~msg:(p2s self#loc#toPretty)
+            ~msg:iaddr
             __FILE__ __LINE__
             ["assignment not recorded";
              "v: " ^ (p2s v#toPretty);
@@ -276,7 +311,7 @@ object (self)
            ~(size: int)
            ~(vtype: btype_t) =
     log_dc_error_result
-      ~msg:(p2s self#loc#toPretty)
+      ~msg:iaddr
       ~tag:"deprecated: record_load"
       __FILE__ __LINE__
       ["memory_recorder#record_load is deprecated. ";
@@ -326,7 +361,7 @@ object (self)
         | _ ->
            log_dc_error_result
              ~tag:"record_stack_variable_load"
-             ~msg:(p2s self#loc#toPretty)
+             ~msg:iaddr
              __FILE__ __LINE__
              ["offset: " ^ (BCHMemoryReference.memory_offset_to_string stackoffset);
               "signed: " ^ (if signed then "yes" else "no")])
@@ -345,14 +380,14 @@ object (self)
            mmap#add_location_gload self#faddr iaddr gaddr offset size signed t_unknown
         | _ ->
            log_error_result
-             ~msg:(p2s self#loc#toPretty)
+             ~msg:iaddr
              ~tag:"record_global_variable_load"
              __FILE__ __LINE__
              ["Unexpected offset for global variable " ^ (p2s var#toPretty)
               ^ ": " ^ (memory_offset_to_string globaloffset)])
       ~error:(fun e ->
         log_dc_error_result
-          ~msg:(p2s self#loc#toPretty)
+          ~msg:iaddr
           ~tag:"record_global_variable_load"
           __FILE__ __LINE__
           (e @ ["Unable to obtain offset from variable " ^ (p2s var#toPretty)]))
@@ -367,7 +402,7 @@ object (self)
     let _ =
       log_diagnostics_result
         ~tag:"record_load_r"
-        ~msg:(p2s self#loc#toPretty)
+        ~msg:iaddr
         __FILE__ __LINE__
         ["addr: " ^ (TR.tfold_default x2s "?" addr_r);
          "var: " ^ (TR.tfold_default (fun v -> p2s v#toPretty) "?" var_r)] in
@@ -379,7 +414,7 @@ object (self)
           self#record_global_variable_load ~signed ~var ~size
         else if self#env#is_basevar_memory_variable var then
           log_dc_error_result
-            ~msg:(p2s self#loc#toPretty)
+            ~msg:iaddr
             ~tag:"record_load_r"
             __FILE__ __LINE__
             ["Recording of basevar loads not yet supported. Var: "
@@ -389,14 +424,14 @@ object (self)
           TR.tfold
             ~ok:(fun addr ->
               log_dc_error_result
-                ~msg:(p2s self#loc#toPretty)
+                ~msg:iaddr
                 ~tag:"record_load_r"
                 __FILE__ __LINE__
                 ["Unable to record memory load for variable " ^ (p2s var#toPretty)
                  ^ " with address " ^ (x2s addr)])
             ~error:(fun e ->
               log_dc_error_result
-                ~msg:(p2s self#loc#toPretty)
+                ~msg:iaddr
                 ~tag:"record_load_r"
                 __FILE__ __LINE__
                 (["Unable to record memory load for variable " ^ (p2s var#toPretty)]
@@ -426,7 +461,7 @@ object (self)
       self#record_stack_variable_store ~var ~size ~vtype ~xpr_r:(Ok xpr)
     else if self#env#is_basevar_memory_variable var then
       log_dc_error_result
-        ~msg:(p2s self#loc#toPretty)
+        ~msg:iaddr
         ~tag:"record memory store"
         __FILE__ __LINE__
         ["Recording of basevar loads not yet supported. Var: "
@@ -442,7 +477,7 @@ object (self)
         | Ok () -> ()
         | Error e ->
            log_dc_error_result
-             ~msg:(p2s self#loc#toPretty)
+             ~msg:iaddr
              ~tag:"record_store"
              __FILE__ __LINE__
              (["addr: " ^ (x2s addr); "var: " ^ (p2s var#toPretty)] @ e) in
@@ -482,7 +517,7 @@ object (self)
              iaddr
         | _ ->
            log_dc_error_result
-             ~msg:(p2s self#loc#toPretty)
+             ~msg:iaddr
              ~tag:"record_store"
              __FILE__ __LINE__
              ["var: " ^ (p2s var#toPretty);
@@ -503,7 +538,7 @@ object (self)
           self#record_stack_variable_store ~var ~size ~vtype ~xpr_r
         else if self#env#is_basevar_memory_variable var then
           log_dc_error_result
-            ~msg:(p2s self#loc#toPretty)
+            ~msg:iaddr
             ~tag:"record memory store"
             __FILE__ __LINE__
             ["Recording of basevar loads not yet supported. Var: "
@@ -520,7 +555,7 @@ object (self)
               | Ok () -> ()
               | Error e ->
                  log_dc_error_result
-                   ~msg:(p2s self#loc#toPretty)
+                   ~msg:iaddr
                    ~tag:"record store"
                    __FILE__ __LINE__ e)
             ~error:(fun e -> log_error_result __FILE__ __LINE__ e)

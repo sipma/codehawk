@@ -2525,21 +2525,33 @@ object (self)
     List.iter (fun eNode ->
         let get = eNode#getAttribute in
         let iaddr = get "iaddr" in
-        let opener =
-          BCHLocation.ctxt_string_to_location (self#get_address) (get "opener") in
-        let polarity =
-          match (get "pol") with
-          | "then" -> FragThen
-          | "else" -> FragElse
-          | s ->
-             raise
-               (BCH_failure
-                  (LBLOCK [STR "read_xml_fragment_memberships: ";
-                           self#get_address#toPretty;
-                           STR ": ";
-                           STR s])) in
-        H.add fragment_membership iaddr
-          {fmem_openerloc = opener; fmem_bucket = polarity})
+        let faddr = self#get_address in
+        TR.tfold
+          ~ok:(fun opener ->
+            let polarity =
+              match (get "pol") with
+              | "then" -> FragThen
+              | "else" -> FragElse
+              | s ->
+                 raise
+                   (BCH_failure
+                      (LBLOCK [STR "read_xml_fragment_memberships: ";
+                               self#get_address#toPretty;
+                               STR ": ";
+                               STR s])) in
+            H.add fragment_membership iaddr
+              {fmem_openerloc = opener; fmem_bucket = polarity})
+          ~error:(fun e ->
+            begin
+              log_error_result
+                ~tag:"read_xml_fragment_memberships"
+                ~msg:faddr#to_hex_string
+                __FILE__ __LINE__ e;
+              raise
+                (BCH_failure
+                   (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+            end)
+          (BCHLocation.ctxt_string_to_location faddr (get "opener")))
       (getcc "fmem")
 
   method private write_xml_test_expressions (node:xml_element_int) =

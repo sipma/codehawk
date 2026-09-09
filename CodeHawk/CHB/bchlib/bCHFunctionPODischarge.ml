@@ -139,7 +139,17 @@ let buffer_writer_callsite
                if defcia = "init" then
                  None
                else if finfo#has_call_target defcia then
-                 Some (BCHLocation.ctxt_string_to_location finfo#a defcia)
+                 TR.tfold
+                   ~ok:(fun loc -> Some loc)
+                   ~error:(fun e ->
+                     begin
+                       log_error_result
+                         ~tag:"buffer_writer_callsite"
+                         ~msg:(p2s loc#toPretty)
+                         __FILE__ __LINE__ e;
+                       None
+                     end)
+                   (BCHLocation.ctxt_string_to_location finfo#a defcia)
                else
                  None)
              vinv#get_reaching_defs)
@@ -199,7 +209,17 @@ let external_buffer_writer_callsite
             if defcia = "init" then
               None
             else if finfo#has_call_target defcia then
-              Some (BCHLocation.ctxt_string_to_location finfo#a defcia)
+              TR.tfold
+                ~ok:(fun loc -> Some loc)
+                ~error:(fun e ->
+                  begin
+                    log_error_result
+                      ~tag:"external_buffer_writer_callsite"
+                      ~msg:(p2s loc#toPretty)
+                      __FILE__ __LINE__ e;
+                    None
+                  end)
+                (BCHLocation.ctxt_string_to_location finfo#a defcia)
             else
               None)
           vinv#get_reaching_defs)
@@ -1555,33 +1575,37 @@ let impose_trusted_os_cmd_string_pc
   let* memvar = finfo#env#mk_basevar_memory_variable paramvar NoOffset in
   let errors =
     List.fold_left (fun errors rcia ->
-        let loc = BCHLocation.ctxt_string_to_location finfo#get_address rcia in
-        match external_buffer_writer_callsite finfo loc memvar with
-        | Some defloc ->
-           let deffloc = BCHFloc.get_finfo_floc finfo defloc in
-           if call_writes_to_buffer deffloc (XVar paramvar) then
-             let xpo = XPOTrustedOsCmdString (XVar paramvar) in
-             begin
-               finfo#proofobligations#add_proofobligation defloc#ci xpo Open;
-               (log_diagnostics_result
-                  ~tag:"impose_trusted_os_cmd_string_pc"
-                  ~msg:(p2s defloc#toPretty)
-                  __FILE__ __LINE__
-                  ["returnloc: " ^ rcia;
-                   "xpo: " ^ (p2s (xpo_predicate_to_pretty xpo))]);
-               errors
-             end
-           else
-             [(elocm __LINE__) ^ "impose_trusted_os_cmd_string_pc";
-              "no buffer write";
-              "returnloc: " ^ rcia;
-              "deffloc: " ^ (p2s deffloc#l#toPretty);
-              "memvar: " ^ (p2s memvar#toPretty)] @ errors
-        | _ ->
-           [(elocm __LINE__) ^ "impose_trusted_os_cmd_string_pc";
-            "no defloc";
-            "returnloc: " ^ rcia;
-            "memvar: " ^ (p2s memvar#toPretty)] @ errors)
+        TR.tfold
+          ~ok:(fun loc ->
+            match external_buffer_writer_callsite finfo loc memvar with
+            | Some defloc ->
+               let deffloc = BCHFloc.get_finfo_floc finfo defloc in
+               if call_writes_to_buffer deffloc (XVar paramvar) then
+                 let xpo = XPOTrustedOsCmdString (XVar paramvar) in
+                 begin
+                   finfo#proofobligations#add_proofobligation defloc#ci xpo Open;
+                   (log_diagnostics_result
+                      ~tag:"impose_trusted_os_cmd_string_pc"
+                      ~msg:(p2s defloc#toPretty)
+                      __FILE__ __LINE__
+                      ["returnloc: " ^ rcia;
+                       "xpo: " ^ (p2s (xpo_predicate_to_pretty xpo))]);
+                   errors
+                 end
+               else
+                 [(elocm __LINE__) ^ "impose_trusted_os_cmd_string_pc";
+                  "no buffer write";
+                  "returnloc: " ^ rcia;
+                  "deffloc: " ^ (p2s deffloc#l#toPretty);
+                  "memvar: " ^ (p2s memvar#toPretty)] @ errors
+            | _ ->
+               [(elocm __LINE__) ^ "impose_trusted_os_cmd_string_pc";
+                "no defloc";
+                "returnloc: " ^ rcia;
+                "memvar: " ^ (p2s memvar#toPretty)] @ errors)
+          ~error:(fun e ->
+            [(elocm __LINE__) ^ "impose_trusted_os_cmd_string_pc"] @ e @ errors)
+          (BCHLocation.ctxt_string_to_location finfo#get_address rcia))
       [] returnlocs in
   match errors with
   | [] -> Ok ()

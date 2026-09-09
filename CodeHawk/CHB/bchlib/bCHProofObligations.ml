@@ -41,7 +41,7 @@ open BCHLocation
 open BCHXPOPredicate
 
 module H = Hashtbl
-
+module TR = CHTraceResult
 
 let p2s = CHPrettyUtil.pretty_to_string
 
@@ -147,21 +147,26 @@ object (self)
            (cia: ctxt_iaddress_t)
            (xpo: xpo_predicate_t)
            (status: po_status_t) =
-    let loc = ctxt_string_to_location self#faddr cia in
-    let po = new proofobligation_t xpo loc status in
-    let _ =
-      log_diagnostics_result
-        ~tag:"add_proofobligation"
-        ~msg:(p2s loc#toPretty)
-        __FILE__ __LINE__
-        ["xpo: " ^ (p2s (xpo_predicate_to_pretty xpo));
-         "status: " ^ (p2s (po_status_to_pretty status))] in
-    let entry =
-      if H.mem store cia then
-        H.find store cia
-      else
-        [] in
-    H.replace store cia (po :: entry)
+    TR.tfold
+      ~ok:(fun loc ->
+        let po = new proofobligation_t xpo loc status in
+        let _ =
+          log_diagnostics_result
+            ~tag:"add_proofobligation"
+            ~msg:(p2s loc#toPretty)
+            __FILE__ __LINE__
+            ["xpo: " ^ (p2s (xpo_predicate_to_pretty xpo));
+             "status: " ^ (p2s (po_status_to_pretty status))] in
+        let entry =
+          if H.mem store cia then
+            H.find store cia
+          else
+            [] in
+        H.replace store cia (po :: entry))
+      ~error:(fun e ->
+        log_error_result
+          ~tag:"add_proofobligation" ~msg:cia __FILE__ __LINE__ e)
+      (ctxt_string_to_location self#faddr cia)
 
   method loc_proofobligations
            (cia: ctxt_iaddress_t): proofobligation_int list =

@@ -30,6 +30,9 @@
 (* chlib *)
 open CHLanguage
 
+(* chutil *)
+open CHTraceResult
+
 (* bchlib *)
 open BCHLibTypes
 
@@ -154,14 +157,14 @@ val make_function_context_location:
 val ctxt_string_to_location:
   doubleword_int      (* outer function address *)
   -> ctxt_iaddress_t  (* string that represents the base location and context *)
-  -> location_int
+  -> location_int traceresult
 
 
 val add_ctxt_to_ctxt_string:
   doubleword_int      (* outer function address *)
   -> ctxt_iaddress_t  (* string that represents the context, outer context first *)
   -> context_t        (* new context to be prepended *)
-  -> ctxt_iaddress_t
+  -> ctxt_iaddress_t traceresult
 
 
 (** [ctxt_string_to_string ctxt_iaddr] converts [ctxt_iaddr] to a string (which,

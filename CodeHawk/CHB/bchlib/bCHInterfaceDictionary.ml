@@ -403,7 +403,7 @@ object (self)
     let getdw (s: string) = TR.tget_ok (string_to_doubleword s) in
     let makeloc (faddr: string) (ci: string) =
       let dw = TR.tget_ok (string_to_doubleword faddr) in
-      ctxt_string_to_location dw ci in
+      TR.tget_ok (ctxt_string_to_location dw ci) in
     let t = t name tags in
     let a = a name args in
     match (t 0) with

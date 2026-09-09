@@ -40,6 +40,10 @@ module H = Hashtbl
 module TR = CHTraceResult
 
 
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
+
+
 let nsplit (separator:char) (s:string):string list =
   let result = ref [] in
   let len = String.length s in
@@ -108,7 +112,7 @@ let mk_base_location (faddr:doubleword_int) (iaddr:doubleword_int) =
 let mk_function_context
       ~(faddr: doubleword_int)
       ~(callsite: doubleword_int)
-      ~(returnsite: doubleword_int) =
+      ~(returnsite: doubleword_int): context_t =
   FunctionContext
     {ctxt_faddr = faddr;
      ctxt_callsite = callsite;
@@ -119,10 +123,10 @@ let contexts = H.create 3
 
 
 let add_function_ctxt_iaddress
-      (faddr:doubleword_int)      (* outer function address *)
-      (s:ctxt_iaddress_t)
-      (basef:doubleword_int)      (* inner function address *)
-      (c:context_t list) =
+      (faddr: doubleword_int)      (* outer function address *)
+      (s: ctxt_iaddress_t)
+      (basef: doubleword_int)      (* inner function address *)
+      (c: context_t list) =
   let faddr = faddr#to_hex_string in
   let basef = basef#to_hex_string in
   let f_entry =
@@ -135,48 +139,46 @@ let add_function_ctxt_iaddress
   if H.mem f_entry s then
     ()
   else
-    H.add f_entry s (basef,c)
+    H.add f_entry s (basef, c)
 
 
-let get_context (faddr: doubleword_int) (s: string) =
+let get_context
+      (faddr: doubleword_int) (s: string)
+    : (doubleword_int * context_t list) TR.traceresult =
   if s = "" then
-    (faddr, [])
+    Ok (faddr, [])
   else
     let faddr = faddr#to_hex_string in
     if H.mem contexts faddr then
       let f_entry = H.find contexts faddr in
       if H.mem f_entry s then
         let (f, c) = H.find f_entry s in
-        (TR.tget_ok (string_to_doubleword f), c)
+        TR.tmap (fun dw -> (dw, c)) (string_to_doubleword f)
       else
-        raise
-          (BCH_failure
-             (LBLOCK [
-                  STR "Contexts for ";
-                  STR faddr;
-                  STR " do not include: ";
-                  STR s]))
+        Error [(elocm __LINE__)
+               ^ "Contexts for " ^ faddr ^ " do not include " ^ s]
     else
-      raise
-        (BCH_failure
-           (LBLOCK [STR "No contexts found for "; STR faddr]))
+      Error [(elocm __LINE__)
+             ^ "No contexts fround for " ^ s ^ " in function " ^ faddr]
 
 
 let decompose_ctxt_string
       (faddr:doubleword_int)    (* outer function address *)
-      (s:ctxt_iaddress_t) =
+      (s:ctxt_iaddress_t)
+    : (context_t list * doubleword_int * doubleword_int) TR.traceresult =
   let s2dw = (fun s -> TR.tget_ok (string_to_doubleword s)) in
   let components = nsplit '_' s in
   let iaddr = s2dw (List.hd (List.rev components)) in
   let ctxtcomponents = List.rev (List.tl (List.rev components)) in
   match ctxtcomponents with
-  | [] -> ([], faddr, iaddr)
-  | ["T@"] -> ([ConditionContext true], faddr, iaddr)
-  | ["F@"] -> ([ConditionContext false], faddr, iaddr)
+  | [] -> Ok ([], faddr, iaddr)
+  | ["T@"] -> Ok ([ConditionContext true], faddr, iaddr)
+  | ["F@"] -> Ok ([ConditionContext false], faddr, iaddr)
   | _ ->
      let ctxtstr = String.concat "_" ctxtcomponents in
-     let (basef, ctxt) = get_context faddr ctxtstr in
-     (ctxt, basef, iaddr)
+     TR.tmap
+       (fun (basef, ctxt) -> (ctxt, basef, iaddr))
+       (get_context faddr ctxtstr)
 
 
 let has_false_condition_context (ctxt_iaddr: ctxt_iaddress_t): bool =
@@ -299,17 +301,23 @@ let make_function_context_location
   make_c_location loc ctxt
 
 
-let ctxt_string_to_location (faddr:doubleword_int) (s:ctxt_iaddress_t) =
-  let (ctxt, basef, iaddr) = decompose_ctxt_string faddr s in
-  make_location ~ctxt {loc_faddr = basef; loc_iaddr = iaddr}
+let ctxt_string_to_location
+      (faddr:doubleword_int) (s:ctxt_iaddress_t): location_int TR.traceresult =
+  TR.tmap
+    ~msg:((elocm __LINE__) ^ "ctxt_string_to_location")
+    (fun (ctxt, basef, iaddr) ->
+      make_location ~ctxt {loc_faddr = basef; loc_iaddr = iaddr})
+    (decompose_ctxt_string faddr s)
 
 
 let add_ctxt_to_ctxt_string
       (faddr:doubleword_int)    (* outer function of existing context *)
       (ctxtstr:ctxt_iaddress_t)
-      (newctxt:context_t) =
-  let loc = ctxt_string_to_location faddr ctxtstr in
-  (make_c_location loc newctxt)#ci
+      (newctxt:context_t): string TR.traceresult =
+  TR.tmap
+    ~msg:"add_ctxt_string_to_string"
+    (fun loc -> (make_c_location loc newctxt)#ci)
+    (ctxt_string_to_location faddr ctxtstr)
 
 
 let symbol_to_ctxt_string (s:symbol_t) =

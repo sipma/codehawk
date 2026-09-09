@@ -2429,20 +2429,27 @@ object (self)
       TR.tbind
         ~msg:(eloc __LINE__)
         (fun callsite ->
-          let loc = ctxt_string_to_location self#fa callsite in
-          let fndata = functions_data#get_function self#fa in
-          if fndata#has_regvar_type_annotation loc#i then
-            fndata#get_regvar_type_annotation loc#i
-          else
-            let ctinfo = self#f#get_call_target callsite in
-            let rty = ctinfo#get_returntype in
-            if is_unknown_type rty then
+          TR.tfold
+            ~ok:(fun loc ->
+              let fndata = functions_data#get_function self#fa in
+              if fndata#has_regvar_type_annotation loc#i then
+                fndata#get_regvar_type_annotation loc#i
+              else
+                let ctinfo = self#f#get_call_target callsite in
+                let rty = ctinfo#get_returntype in
+                if is_unknown_type rty then
+                  Error [(elocm __LINE__);
+                         (p2s self#l#toPretty);
+                         "return type of function " ^ ctinfo#get_name
+                         ^ " not known"]
+                else
+                  Ok rty)
+            ~error:(fun e ->
               Error [(elocm __LINE__);
                      (p2s self#l#toPretty);
-                     "return type of function " ^ ctinfo#get_name
-                     ^ " not known"]
-            else
-              Ok rty)
+                     String.concat "; " e;
+                     "location of return type of function invalid"])
+            (ctxt_string_to_location self#fa callsite))
         (self#f#env#get_call_site v)
 
     else if self#f#env#is_register_variable v then
