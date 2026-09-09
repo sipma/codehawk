@@ -7,7 +7,7 @@
  
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny Sipma
-   Copyright (c) 2022-2024 Aarno Labs LLC
+   Copyright (c) 2022-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -123,14 +123,14 @@ let loc_basic () =
       ~title:"ctxt-string-to-loc"
       (fun () ->
         let s = cloc#ci in
-        let loc = L.ctxt_string_to_location (make_dw faddr2) s in
+        let loc = TR.tget_ok (L.ctxt_string_to_location (make_dw faddr2) s) in
         A.equal_string loc#ci s);
 
     TS.add_simple_test
       ~title:"ctxt-string-to-loc-eq"
       (fun () ->
         let s = cloc#ci in
-        let loc = L.ctxt_string_to_location (make_dw faddr2) s in
+        let loc = TR.tget_ok (L.ctxt_string_to_location (make_dw faddr2) s) in
         BA.equal_location cloc loc);
 
     TS.add_simple_test
@@ -138,13 +138,14 @@ let loc_basic () =
       (fun () ->
         let s = cloc#ci in
         let s2 =
-          L.add_ctxt_to_ctxt_string
-            (make_dw faddr2)
-            s
-            (FunctionContext
-               {ctxt_faddr = make_dw faddr3;
-                ctxt_callsite = make_dw iaddr31;
-                ctxt_returnsite = make_dw iaddr32}) in
+          TR.tget_ok (
+              L.add_ctxt_to_ctxt_string
+                (make_dw faddr2)
+                s
+                (FunctionContext
+                   {ctxt_faddr = make_dw faddr3;
+                    ctxt_callsite = make_dw iaddr31;
+                    ctxt_returnsite = make_dw iaddr32})) in
         A.equal_string s2 (fc [iaddr31; iaddr21; iaddr11]));
 
     TS.launch_tests ()

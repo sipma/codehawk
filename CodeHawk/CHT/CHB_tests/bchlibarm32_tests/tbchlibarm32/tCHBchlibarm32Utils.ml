@@ -148,7 +148,7 @@ let get_instrxdata_xprs
       (fun _baddr block ->
         block#itera
           (fun ctxtiaddr instr ->
-            let loc = ctxt_string_to_location faddr ctxtiaddr in
+            let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
             let floc = get_floc loc in
             ignore (id#index_instr instr floc))) in
   let (_, xprs) =
@@ -166,7 +166,7 @@ let get_instrxdata_tags (faddr: doubleword_int) (iaddr: doubleword_int) =
       (fun _baddr block ->
         block#itera
           (fun ctxtiaddr instr ->
-            let loc = ctxt_string_to_location faddr ctxtiaddr in
+            let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
             let floc = get_floc loc in
             ignore (id#index_instr instr floc))) in
   TR.tget_ok (testsupport#retrieve_instrx_tags iaddr#to_hex_string)
