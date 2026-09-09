@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
    ============================================================================= *)
 
 (* chutil *)
+open CHLogger
 open CHXmlDocument
 
 (* bchlib *)
@@ -46,6 +47,8 @@ open BCHMIPSLoopStructure
 open BCHMIPSDictionary
 
 module H = Hashtbl
+module TR = CHTraceResult
+
 
 class fn_analysis_results_t (fn:mips_assembly_function_int) =
 object (self)
@@ -65,19 +68,27 @@ object (self)
       None
 
   method private write_xml_instruction
-                   (node:xml_element_int) (ctxtiaddr:ctxt_iaddress_t)
+                   (node:xml_element_int)
+                   (ctxtiaddr:ctxt_iaddress_t)
                    (instr:mips_assembly_instruction_int)
                    (restriction:block_restriction_t option) =
-    let loc = ctxt_string_to_location faddr ctxtiaddr in
-    let floc = get_floc loc in
-    let espoffset = floc#get_stackpointer_offset "mips" in
-    begin
-      mips_dictionary#write_xml_mips_opcode node instr#get_opcode;
-      id#write_xml_instr node instr floc restriction;
-      id#write_xml_sp_offset node espoffset;
-      mips_dictionary#write_xml_mips_bytestring
-        node (byte_string_to_printed_string instr#get_instruction_bytes)
-    end
+    TR.tfold
+      ~ok:(fun loc ->
+        let floc = get_floc loc in
+        let espoffset = floc#get_stackpointer_offset "mips" in
+        begin
+          mips_dictionary#write_xml_mips_opcode node instr#get_opcode;
+          id#write_xml_instr node instr floc restriction;
+          id#write_xml_sp_offset node espoffset;
+          mips_dictionary#write_xml_mips_bytestring
+            node (byte_string_to_printed_string instr#get_instruction_bytes)
+        end)
+      ~error:(fun e ->
+        log_error_result
+          ~tag:"write_xml_instruction"
+          ~msg:ctxtiaddr
+          __FILE__ __LINE__ e)
+      (ctxt_string_to_location faddr ctxtiaddr)
 
   method private write_xml_instructions (node:xml_element_int) =
     fn#itera (fun baddr block ->

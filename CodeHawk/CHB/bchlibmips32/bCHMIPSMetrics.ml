@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020      Henny B. Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,9 @@
    SOFTWARE.
    ============================================================================= *)
 
+(* chutil *)
+open CHLogger
+
 (* bchlib *)
 open BCHFloc
 open BCHLibTypes
@@ -36,6 +39,8 @@ open BCHLocation
 open BCHMIPSLoopStructure
 open BCHMIPSOpcodeRecords
 open BCHMIPSTypes
+
+module TR = CHTraceResult
 
 
 let get_mips_op_metrics
@@ -67,13 +72,24 @@ let get_mips_op_metrics
     match ops with
     | [] -> ()
     | _ ->
-       let loc = ctxt_string_to_location faddr ctxtiaddr in
-       let floc = get_floc loc in
-       List.iter (fun (op:mips_operand_int) ->
-	   match op#get_mode with
-	   | RD -> add_read floc op
-	   | WR -> add_write floc op
-	   | RW -> begin add_read floc op ; add_write floc op end) ops) in
+       TR.tfold
+         ~ok:(fun loc ->
+           let floc = get_floc loc in
+           List.iter (fun (op:mips_operand_int) ->
+	       match op#get_mode with
+	       | RD -> add_read floc op
+	       | WR -> add_write floc op
+	       | RW ->
+                  begin
+                    add_read floc op;
+                    add_write floc op
+                  end) ops)
+         ~error:(fun e ->
+           log_error_result
+             ~tag:"get_mips_op_metrics"
+             ~msg:faddr#to_hex_string
+             __FILE__ __LINE__ e)
+         (ctxt_string_to_location faddr ctxtiaddr)) in
   (!reads,!qreads,!writes,!qwrites)
 
 
@@ -85,13 +101,21 @@ let get_mips_stackpointer_metrics
   let _ =
     f#iteri
       (fun _ ctxtiaddr _ ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
-        let floc = get_floc loc in
-        let (_,range) = floc#get_stackpointer_offset "mips" in
-        if range#isTop then
-          esptop := !esptop + 1
-        else match range#singleton with
-               Some _ -> () | _ -> esprange := !esprange + 1) in
+        TR.tfold
+          ~ok:(fun loc ->
+            let floc = get_floc loc in
+            let (_,range) = floc#get_stackpointer_offset "mips" in
+            if range#isTop then
+              esptop := !esptop + 1
+            else
+              match range#singleton with
+              | Some _ -> () | _ -> esprange := !esprange + 1)
+          ~error:(fun e ->
+            log_error_result
+              ~tag:"get_mips_stackpointer_metrics"
+              ~msg:faddr#to_hex_string
+              __FILE__ __LINE__ e)
+       (ctxt_string_to_location faddr ctxtiaddr)) in
   (!esptop,!esprange)
 
 

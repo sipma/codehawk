@@ -6,7 +6,7 @@
  
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2025 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,7 @@ open BCHMIPSDisassemblyUtils
 open BCHMIPSTypes
 
 module H = Hashtbl
+module TR = CHTraceResult
 
 
 class mips_assembly_function_t
@@ -180,27 +181,34 @@ let inline_blocks
             if is_to_be_inlined s then
               let succblock = f#get_block s in
               let ctxt = BlockContext block#get_first_address in
-              let newctxtstr = add_ctxt_to_ctxt_string faddr s ctxt in
-              let _ =
-                if H.mem newblocks newctxtstr then
-                  ()
-                else
-                  let newblock =
-                    make_block_ctxt_mips_assembly_block ctxt succblock in
+              TR.tfold
+                ~ok:(fun newctxtstr ->
+                  let _ =
+                    if H.mem newblocks newctxtstr then
+                      ()
+                    else
+                      let newblock =
+                        make_block_ctxt_mips_assembly_block ctxt succblock in
+                      begin
+                        chlog#add
+                          "mips assembly block: add context"
+                          (LBLOCK [faddr#toPretty; STR ": "; STR newctxtstr]);
+                        H.add newblocks newctxtstr newblock
+                      end in
+                  let thisnewblock =
+                    update_mips_assembly_block_successors block s newctxtstr in
                   begin
+                    H.replace newblocks baddr thisnewblock;
                     chlog#add
-                      "mips assembly block: add context"
-                      (LBLOCK [faddr#toPretty; STR ": "; STR newctxtstr]);
-                    H.add newblocks newctxtstr newblock
-                  end in
-              let thisnewblock =
-                update_mips_assembly_block_successors block s newctxtstr in
-              begin
-                H.replace newblocks baddr thisnewblock;
-                chlog#add
-                  "mips assembly block: replace successor"
-                  (LBLOCK [faddr#toPretty; STR ": "; STR baddr])
-              end) block#get_successors;
+                      "mips assembly block: replace successor"
+                      (LBLOCK [faddr#toPretty; STR ": "; STR baddr])
+                  end)
+                ~error:(fun e ->
+                  log_error_result
+                    ~tag:"inline_blocks"
+                    ~msg:faddr#to_hex_string
+                    __FILE__ __LINE__ e)
+                (add_ctxt_to_ctxt_string faddr s ctxt)) block#get_successors;
         List.iter process_block block#get_successors
       end in
   let _ = process_block faddr#to_hex_string in

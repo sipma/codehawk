@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2025 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -692,7 +692,10 @@ let trace_block
               match b#get_successors with
               | [] ->
                  [(make_location {loc_faddr = faddr; loc_iaddr = returnsite})#ci]
-              | l -> List.map (fun s -> add_ctxt_to_ctxt_string faddr s ctxt) l in
+              | l ->
+                 List.map
+                   (fun s ->
+                     TR.tget_ok (add_ctxt_to_ctxt_string faddr s ctxt)) l in
             make_ctxt_mips_assembly_block ctxt b succ) fn#get_blocks in
       Ok (Some [callsucc], va, inlinedblocks)
     else
@@ -748,7 +751,7 @@ let trace_function (faddr:doubleword_int): mips_assembly_function_int =
       ~ok:(fun instr -> instr#set_block_entry)
       ~error:(fun e -> log_error_result __FILE__ __LINE__ e)
       (get_mips_assembly_instruction baddr) in
-  let get_iaddr s = (ctxt_string_to_location faddr s)#i in
+  let get_iaddr s = (TR.tget_ok (ctxt_string_to_location faddr s))#i in
   let add_to_workset l =
     List.iter (fun a -> if doneSet#has a then () else workSet#add a) l in
   let blocks = ref [] in
@@ -861,7 +864,8 @@ let record_call_targets () =
               | JumpLink op ->
                  if finfo#has_call_target ctxtiaddr
                     && not (finfo#get_call_target ctxtiaddr)#is_unknown then
-                   let loc = ctxt_string_to_location faddr ctxtiaddr in
+                   let loc =
+                     TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
                    let floc = get_floc loc in
                    floc#update_call_target
                  else
@@ -875,9 +879,11 @@ let record_call_targets () =
                             ctxtiaddr (mk_app_target op#get_absolute_address)
                    end
               | JumpLinkRegister (_ra, _op) ->
-                 let iaddr = (ctxt_string_to_location faddr ctxtiaddr)#i in
+                 let iaddr =
+                   (TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr))#i in
                  if finfo#has_call_target ctxtiaddr then
-                   let loc = ctxt_string_to_location faddr ctxtiaddr in
+                   let loc =
+                     TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
                    let floc = get_floc loc in
                    floc#update_call_target
                  else if system_info#has_call_target faddr iaddr then
@@ -1066,7 +1072,7 @@ let resolve_indirect_mips_calls (f:mips_assembly_function_int) =
   let _ =
     f#iteri
       (fun faddr ctxtiaddr instr ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
+        let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
         match instr#get_opcode with
         | JumpLinkRegister (_ra, tgt) ->
            let floc = get_floc loc in

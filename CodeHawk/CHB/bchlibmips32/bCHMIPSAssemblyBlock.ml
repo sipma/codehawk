@@ -6,7 +6,7 @@
  
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -167,7 +167,8 @@ let make_ctxt_mips_assembly_block
     :mips_assembly_block_int =
   let bsucc = b#get_successors in
   let faddr = b#get_faddr in
-  let succ = List.map (fun s -> add_ctxt_to_ctxt_string faddr s newctxt) bsucc in
+  let succ =
+    List.map (fun s -> TR.tget_ok (add_ctxt_to_ctxt_string faddr s newctxt)) bsucc in
   make_mips_assembly_block
     ~ctxt:(newctxt :: b#get_context)
     b#get_faddr

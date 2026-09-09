@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -258,7 +258,7 @@ let translate_mips_instruction
       ~(cmds:cmd_t list) =                         (* commands carried over *)
   let (ctxtiaddr,instr) = codepc#get_next_instruction in
   let faddr = funloc#f in
-  let loc = ctxt_string_to_location faddr ctxtiaddr in    (* instr location *)
+  let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
   let finfo = get_function_info faddr in
   let env = finfo#env in
   let invlabel = get_invariant_label loc in
