@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2023-2024  Aarno Labs LLC
+   Copyright (c) 2023-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,8 @@ module TR = CHTraceResult
 
 
 let x2p = xpr_formatter#pr_expr
+let p2s = pretty_to_string
+
 
 let log_error (tag: string) (msg: string): tracelogspec_t =
   mk_tracelog_spec ~tag:("FnPowerDictionary:"^ tag) msg
@@ -120,19 +122,35 @@ object (self)
           if varssize = 1 then
             let xvar = List.hd vars in
             if floc#env#is_frozen_test_value xvar then
-              log_tfold
-                (log_error "index_instr" "invalid test address")
-              ~ok:(fun (testvar, testiaddr, _) ->
-                let testloc = ctxt_string_to_location floc#fa testiaddr in
-                let testfloc = get_floc testloc in
-                let extxprs = testfloc#inv#get_external_exprs testvar in
-                let extxprs =
-                  List.map (fun e -> substitute_expr (fun _v -> e) xpr) extxprs in
-                (match extxprs with
-                 | [] -> xpr
-                 | _ -> List.hd extxprs))
-              ~error:(fun _ -> xpr)
-              (floc#env#get_frozen_variable xvar)
+              TR.tfold
+                ~ok:(fun (testvar, testiaddr, _) ->
+                  TR.tfold
+                     ~ok:(fun testloc ->
+                       let testfloc = get_floc testloc in
+                       let extxprs = testfloc#inv#get_external_exprs testvar in
+                       let extxprs =
+                         List.map (fun e -> substitute_expr (fun _v -> e) xpr) extxprs in
+                       (match extxprs with
+                        | [] -> xpr
+                        | _ -> List.hd extxprs))
+                     ~error:(fun e ->
+                       begin
+                         log_error_result
+                           ~tag:"index_instr"
+                           ~msg:(p2s floc#l#toPretty)
+                           __FILE__ __LINE__ e;
+                         xpr
+                       end)
+                     (ctxt_string_to_location floc#fa testiaddr))
+                ~error:(fun e ->
+                  begin
+                    log_error_result
+                      ~tag:"index_instr"
+                      ~msg:(p2s floc#l#toPretty)
+                      __FILE__ __LINE__ e;
+                    xpr
+                  end)
+                (floc#env#get_frozen_variable xvar)
             else
               xpr
           else
@@ -156,7 +174,7 @@ object (self)
             end in
 
     let rewrite_test_expr (csetter: ctxt_iaddress_t) (x: xpr_t) =
-      let testloc = ctxt_string_to_location floc#fa csetter in
+      let testloc = TR.tget_ok (ctxt_string_to_location floc#fa csetter) in
       let testfloc = get_floc testloc in
       let xpr = testfloc#inv#rewrite_expr x in
       let xpr =
@@ -168,7 +186,8 @@ object (self)
             log_tfold
               (log_error "rewrite_test_expr" "invalid test address")
               ~ok:(fun (testvar, testiaddr, _) ->
-                let testloc = ctxt_string_to_location floc#fa testiaddr in
+                let testloc =
+                  TR.tget_ok (ctxt_string_to_location floc#fa testiaddr) in
                 let testfloc = get_floc testloc in
                 let extxprs = testfloc#inv#get_external_exprs testvar in
                 let extxprs =

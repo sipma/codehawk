@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2023-2024  Aarno Labs LLC
+   Copyright (c) 2023-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -265,7 +265,7 @@ let translate_pwr_instruction
   let (ctxtiaddr, instr) = codepc#get_next_instruction in
   let faddr = funloc#f in
   let finfo = get_function_info faddr in
-  let loc = ctxt_string_to_location faddr ctxtiaddr in
+  let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
   let invlabel = get_invariant_label loc in
   let invop = OPERATION {op_name = invlabel; op_args = []} in
   let bwdinvlabel = get_invariant_label ~bwd:true loc in
@@ -336,8 +336,8 @@ let translate_pwr_instruction
          let transaction = package_transaction finfo blocklabel cmds in
          if finfo#has_associated_cc_setter ctxtiaddr then
            let testiaddr = finfo#get_associated_cc_setter ctxtiaddr in
-           let testloc = ctxt_string_to_location faddr testiaddr in
-           let testaddr = (ctxt_string_to_location faddr testiaddr)#i in
+           let testloc = TR.tget_ok (ctxt_string_to_location faddr testiaddr) in
+           let testaddr = testloc#i in
            let testinstr =
              fail_tvalue
                (trerror_record

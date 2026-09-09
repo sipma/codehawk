@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2023-2025  Aarno Labs LLC
+   Copyright (c) 2023-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -285,7 +285,7 @@ let construct_pwr_assembly_function
   let newfnentries = new DoublewordCollections.set_t in
   let workset = new DoublewordCollections.set_t in
   let doneset = new DoublewordCollections.set_t in
-  let get_iaddr s = (ctxt_string_to_location faddr s)#i in
+  let get_iaddr s = (TR.tget_ok (ctxt_string_to_location faddr s))#i in
   let add_to_workset l =
     List.iter (fun a -> if doneset#has a then () else workset#add a) l in
   let set_block_entry (baddr: doubleword_int) =

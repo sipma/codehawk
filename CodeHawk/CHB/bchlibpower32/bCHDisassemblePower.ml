@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2022-2024  Aarno Labs LLC
+   Copyright (c) 2022-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -459,7 +459,8 @@ let record_call_targets_pwr () =
             | BranchLink (_, tgtop, _) ->
                if finfo#has_call_target ctxtiaddr
                   && not (finfo#get_call_target ctxtiaddr)#is_unknown then
-                 let loc = ctxt_string_to_location faddr ctxtiaddr in
+                 let loc =
+                   TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
                  let floc = get_floc loc in
                  floc#update_call_target
                else if tgtop#is_absolute_address then
@@ -484,7 +485,7 @@ let associate_condition_code_users_pwr () =
         (ctxtiaddr: ctxt_iaddress_t)
         (block: pwr_assembly_block_int) =
     let finfo = get_function_info faddr in
-    let loc = ctxt_string_to_location faddr ctxtiaddr in
+    let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
     let revInstrs: pwr_assembly_instruction_int list =
       block#get_instructions_rev ~high:loc#i () in
 
@@ -510,7 +511,7 @@ let associate_condition_code_users_pwr () =
          match get_pwr_crfs_set instr#get_opcode with
          | [] -> set tl
          | crfs_set when List.mem crf_used crfs_set->
-            let iloc = ctxt_string_to_location faddr ctxtiaddr in
+            let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
             let instrctxt = (make_i_location iloc instr#get_address)#ci in
             finfo#connect_cc_user ctxtiaddr instrctxt
          | _ -> set tl in
