@@ -2722,8 +2722,10 @@ object (self)
 	    self#read_xml_test_variables (getc "test-variables"));
 	(if hasc "test-expressions" then
 	   self#read_xml_test_expressions (getc "test-expressions"));
+        (*
         (if hasc "fragment-memberships" then
            self#read_xml_fragment_memberships (getc "fragment-memberships"));
+         *)
         (if hasc "format-strings" then
            self#read_xml_format_strings (getc "format-strings"));
 	(if hasc "base-pointers" then

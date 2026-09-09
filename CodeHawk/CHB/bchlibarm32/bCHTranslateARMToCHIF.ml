@@ -4828,7 +4828,7 @@ object (self)
     let cfg = codegraph#to_cfg entryLabel exitLabel in
     let body = LF.mkCode [CFG (procname, cfg)] in
     let proc = LF.mkProcedure procname ~signature:[] ~bindings:[] ~scope ~body in
-    let _ = pr_debug [proc#toPretty; NL] in
+    (* let _ = pr_debug [proc#toPretty; NL] in *)
     arm_chif_system#add_arm_procedure proc
 
 end
