@@ -77,6 +77,9 @@ let p2s = CHPrettyUtil.pretty_to_string
 let x2s x = p2s (x2p x)
 let x_r2s x_r = TR.tfold_default x2s "error-value" x_r
 
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
+
 let log_error (tag: string) (msg: string): tracelogspec_t =
   mk_tracelog_spec ~tag:("TranslateARMToCHIF:" ^ tag) msg
 
@@ -91,7 +94,20 @@ let translate_arm_instruction
   let (ctxtiaddr, instr) = codepc#get_next_instruction in
   let faddr = funloc#f in
   let finfo = get_function_info faddr in
-  let loc = ctxt_string_to_location faddr ctxtiaddr in  (* instr location *)
+  let loc =
+    match ctxt_string_to_location faddr ctxtiaddr with
+    | Ok loc -> loc
+    | Error e ->
+       begin
+         log_error_result
+           ~tag:"translate_arm_instruction"
+           ~msg:ctxtiaddr
+           __FILE__ __LINE__ e;
+         raise
+           (BCH_failure
+              (LBLOCK [STR (elocm __LINE__); STR ctxtiaddr; STR ": ";
+                       STR (String.concat "; " e)]))
+       end in
   let invlabel = get_invariant_label loc in
   let invop = OPERATION {op_name = invlabel; op_args = []} in
   let bwdinvlabel = get_invariant_label ~bwd:true loc in
@@ -653,8 +669,22 @@ let translate_arm_instruction
           package_terminator_transactions finfo blocklabel cmds thencode elsecode in
      if finfo#has_associated_cc_setter ctxtiaddr then
        let testiaddr = finfo#get_associated_cc_setter ctxtiaddr in
-       let testloc = ctxt_string_to_location faddr testiaddr in
-       let testaddr = (ctxt_string_to_location faddr testiaddr)#i in
+       let testloc =
+         match ctxt_string_to_location faddr testiaddr with
+         | Ok loc -> loc
+         | Error e ->
+            begin
+              log_error_result
+                ~tag:"translate_arm_instruction:Branch"
+                ~msg:ctxtiaddr
+                __FILE__ __LINE__
+                ["testiaddr: " ^ testiaddr];
+              raise
+                (BCH_failure
+                   (LBLOCK [STR (elocm __LINE__); STR ctxtiaddr; STR " -> ";
+                            STR testiaddr; STR (String.concat "; " e)]))
+            end in
+       let testaddr = testloc#i in
        let testinstr =
          fail_tvalue
            (trerror_record

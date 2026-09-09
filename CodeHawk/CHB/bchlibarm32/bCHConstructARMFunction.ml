@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2022-2025  Aarno Labs LLC
+   Copyright (c) 2022-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,10 @@ open BCHARMAssemblyInstructions
 open BCHARMTypes
 open BCHLocation
 
-
 module TR = CHTraceResult
+
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
 
 
 module DoublewordCollections = CHCollections.Make (
@@ -402,29 +404,40 @@ let construct_arm_assembly_block
                  let exitixs = b#exit_edges_indices in
                  let (_, xix, succ) =
                    List.fold_left (fun (ix, xix, acc) s ->
-                       match xix with
-                       | [] ->
-                          (ix + 1,
-                           [],
-                           (add_ctxt_to_ctxt_string faddr s functioncontext)
-                           :: acc)
-                       | h :: tl when ix = h ->
-                          (ix + 1,
-                           tl,
-                           inline_exit
-                           :: (add_ctxt_to_ctxt_string faddr s functioncontext)
-                           :: acc)
-                       | _  ->
-                          (ix + 1,
-                           xix,
-                           (add_ctxt_to_ctxt_string faddr s functioncontext)
-                           :: acc))
+                       TR.tfold
+                         ~ok:(fun newctxtstr ->
+                           match xix with
+                           | [] ->
+                              (ix + 1, [], newctxtstr :: acc)
+                           | h :: tl when ix = h ->
+                              (ix + 1, tl, inline_exit :: newctxtstr :: acc)
+                           | _  ->
+                              (ix + 1, xix, newctxtstr :: acc))
+                         ~error:(fun e ->
+                           begin
+                             log_error_result
+                               ~tag:"get_inlined_call_blocks"
+                               ~msg:inline_exit
+                               __FILE__ __LINE__ e;
+                             (ix + 1, xix, acc)
+                           end)
+                         (add_ctxt_to_ctxt_string faddr s functioncontext))
                      (1, exitixs, []) l in
                  (* add exits for remaining exit indices *)
                  succ @ (List.map (fun _ -> inline_exit) xix)
                else
                  List.map (fun s ->
-                     add_ctxt_to_ctxt_string faddr s functioncontext) l in
+                     let newctxtstr =
+                       add_ctxt_to_ctxt_string faddr s functioncontext in
+                     match newctxtstr with
+                     | Ok ctxtstr -> ctxtstr
+                     | Error e ->
+                        begin
+                          log_error_result ~tag:"inlinedblocks"__FILE__ __LINE__ e;
+                          raise
+                            (BCH_failure
+                               (LBLOCK [STR (elocm __LINE__); STR s]))
+                        end) l in
           make_ctxt_arm_assembly_block functioncontext b succ)
       inlinedfn#get_blocks in
 
@@ -572,7 +585,21 @@ let construct_arm_assembly_function
   let newfnentries = new DoublewordCollections.set_t in
   let workset = new DoublewordCollections.set_t in
   let doneset = new DoublewordCollections.set_t in
-  let get_iaddr s = (ctxt_string_to_location faddr s)#i in
+  let get_ctxt_loc s =
+    match ctxt_string_to_location faddr s with
+    | Ok loc -> loc
+    | Error e ->
+       begin
+         log_error_result
+           ~tag:"construct_arm_assembly_function"
+           ~msg:faddr#to_hex_string
+           __FILE__ __LINE__ e;
+         raise
+           (BCH_failure
+              (LBLOCK [STR (elocm __LINE__); STR s; STR ": ";
+                       STR (String.concat "; " e)]))
+       end in
+  let get_iaddr s = (get_ctxt_loc s)#i in
   let add_to_workset l =
     List.iter (fun a -> if doneset#has a then () else workset#add a) l in
   let set_block_entry (baddr: doubleword_int) =

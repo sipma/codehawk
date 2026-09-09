@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2021-2024  Aarno Labs, LLC
+   Copyright (c) 2021-2026  Aarno Labs, LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,8 @@ open BCHDisassembleThumbInstruction
 module H = Hashtbl
 module TR = CHTraceResult
 
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
 
 let log_error (tag: string) (msg: string): tracelogspec_t =
   mk_tracelog_spec ~tag:("disassemble-arm:" ^ tag) msg
@@ -836,9 +838,16 @@ let record_call_targets_arm () =
                 | BranchLinkExchange (_, op) ->
                  if finfo#has_call_target ctxtiaddr
                     && not (finfo#get_call_target ctxtiaddr)#is_unknown then
-                   let loc = ctxt_string_to_location faddr ctxtiaddr in
-                   let floc = get_floc loc in
-                   floc#update_call_target
+                   TR.tfold
+                     ~ok:(fun loc ->
+                       let floc = get_floc loc in
+                       floc#update_call_target)
+                     ~error:(fun e ->
+                       log_error_result
+                         ~tag:"record_call_targets_arm"
+                         ~msg:ctxtiaddr
+                         __FILE__ __LINE__ e)
+                     (ctxt_string_to_location faddr ctxtiaddr)
                  else if op#is_absolute_address then
                    begin
                      match get_so_target op#get_absolute_address instr with
@@ -862,9 +871,16 @@ let record_call_targets_arm () =
                           tgt#get_absolute_address ->
                  if finfo#has_call_target ctxtiaddr
                     && not (finfo#get_call_target ctxtiaddr)#is_unknown then
-                   let loc = ctxt_string_to_location faddr ctxtiaddr in
-                   let floc = get_floc loc in
-                   floc#update_call_target
+                   TR.tfold
+                     ~ok:(fun loc ->
+                       let floc = get_floc loc in
+                       floc#update_call_target)
+                     ~error:(fun e ->
+                       log_error_result
+                         ~tag:"record_call_targets_arm"
+                         ~msg:ctxtiaddr
+                         __FILE__ __LINE__ e)
+                     (ctxt_string_to_location faddr ctxtiaddr)
                  else
                    begin
                      match get_so_target tgt#get_absolute_address instr with
@@ -911,7 +927,20 @@ let associate_condition_code_users () =
         (ctxtiaddr:ctxt_iaddress_t)
         (block: arm_assembly_block_int) =
     let finfo = get_function_info faddr in
-    let loc = ctxt_string_to_location faddr ctxtiaddr in
+    let loc =
+      match ctxt_string_to_location faddr ctxtiaddr with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"associate_condition_code_users:set_condition"
+             ~msg:ctxtiaddr
+             __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR ctxtiaddr; STR ": ";
+                         STR (String.concat "; " e)]))
+         end in
     let revInstrs: arm_assembly_instruction_int list =
       block#get_instructions_rev ~high:loc#i () in
 
@@ -937,9 +966,16 @@ let associate_condition_code_users () =
 	| [] -> set tl
 	| flags_set ->
 	  if List.for_all (fun fUsed -> List.mem fUsed flags_set) flags_used then
-             let iloc = ctxt_string_to_location faddr ctxtiaddr in
-             let instrctxt = (make_i_location iloc instr#get_address)#ci in
-	    finfo#connect_cc_user ctxtiaddr instrctxt in
+            TR.tfold
+              ~ok:(fun iloc ->
+                let instrctxt = (make_i_location iloc instr#get_address)#ci in
+	        finfo#connect_cc_user ctxtiaddr instrctxt)
+              ~error:(fun e ->
+                log_error_result
+                  ~tag:"associate_condition_code_users:set_condition"
+                  ~msg:ctxtiaddr
+                  __FILE__ __LINE__ e)
+              (ctxt_string_to_location faddr ctxtiaddr) in
     set revInstrs in
   let count = ref 0 in
   arm_assembly_functions#itera

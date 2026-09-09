@@ -48,6 +48,9 @@ module TR = CHTraceResult
 
 let id = BCHInterfaceDictionary.interface_dictionary
 
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
+
 
 let armreg_compare r1 r2 =
   Stdlib.compare (armreg_to_string r1) (armreg_to_string r2)
@@ -348,17 +351,24 @@ let inline_blocks
               let _ = chlog#add "to be inlined" (STR s) in
               let succblock = f#get_block s in
               let ctxt = BlockContext block#get_first_address in
-              let newctxtstr = add_ctxt_to_ctxt_string faddr s ctxt in
-              let _ =
-                if H.mem newblocks newctxtstr then
-                  ()
-                else
-                  let newblock =
-                    make_block_ctxt_arm_assembly_block ctxt succblock in
-                    H.add newblocks newctxtstr newblock in
-              let thisnewblock =
-                update_arm_assembly_block_successors block s [newctxtstr] in
-              H.replace newblocks baddr thisnewblock) block#get_successors;
+              TR.tfold
+                ~ok:(fun newctxtstr ->
+                  let _ =
+                    if H.mem newblocks newctxtstr then
+                      ()
+                    else
+                      let newblock =
+                        make_block_ctxt_arm_assembly_block ctxt succblock in
+                      H.add newblocks newctxtstr newblock in
+                  let thisnewblock =
+                    update_arm_assembly_block_successors block s [newctxtstr] in
+                  H.replace newblocks baddr thisnewblock)
+                ~error:(fun e ->
+                  log_error_result
+                    ~tag:"inline_blocks"
+                    ~msg:faddr#to_hex_string
+                    __FILE__ __LINE__ e)
+                (add_ctxt_to_ctxt_string faddr s ctxt)) block#get_successors;
         List.iter process_block block#get_successors
       end in
   let _ = process_block faddr#to_hex_string in
@@ -386,19 +396,29 @@ let create_path_contexts
   let rec create_path (p: string) (s: ctxt_iaddress_t) =
     let pblock = f#get_block s in
     let ctxt = PathContext p in
-    let pctxtaddr = add_ctxt_to_ctxt_string faddr s ctxt in
-    if H.mem newblocks pctxtaddr then
-      pctxtaddr
-    else
-      (* add first to avoid infinite recursion for loop *)
-      let _ = H.add newblocks pctxtaddr pblock in
-      let psucc = pblock#get_successors in
-      let new_succ = List.map (create_path p) psucc in
-      let newblock = make_ctxt_arm_assembly_block ctxt pblock new_succ in
-      begin
-        H.replace newblocks pctxtaddr newblock;
-        pctxtaddr
-      end in
+    TR.tfold
+      ~ok:(fun pctxtaddr ->
+        if H.mem newblocks pctxtaddr then
+          pctxtaddr
+        else
+          (* add first to avoid infinite recursion for loop *)
+          let _ = H.add newblocks pctxtaddr pblock in
+          let psucc = pblock#get_successors in
+          let new_succ = List.map (create_path p) psucc in
+          let newblock = make_ctxt_arm_assembly_block ctxt pblock new_succ in
+          begin
+            H.replace newblocks pctxtaddr newblock;
+            pctxtaddr
+          end)
+      ~error:(fun e ->
+        begin
+          log_error_result
+            ~tag:"create_patch_contexts" ~msg:s __FILE__ __LINE__ e;
+          raise
+            (BCH_failure
+               (LBLOCK [STR (elocm __LINE__); STR "create_path_contexts"]))
+        end)
+      (add_ctxt_to_ctxt_string faddr s ctxt) in
 
   let rec process_block (baddr: ctxt_iaddress_t) =
     if H.mem newblocks baddr then

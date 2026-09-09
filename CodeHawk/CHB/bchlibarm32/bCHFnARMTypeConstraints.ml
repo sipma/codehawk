@@ -40,6 +40,7 @@ open XprUtil
 open Xsimplify
 
 (* bchlib *)
+open BCHBasicTypes
 open BCHBCFiles
 open BCHBCTypePretty
 open BCHBCTypes
@@ -68,10 +69,9 @@ let p2s = CHPrettyUtil.pretty_to_string
 let x2s x = p2s (x2p x)
 
 
-(*
 let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
 let elocm (line: int): string = (eloc line) ^ ": "
- *)
+
 
 class arm_fn_type_constraints_t
         (store: type_constraint_store_int)
@@ -107,7 +107,18 @@ object (self)
 
   method private record_instr_type_constraints
                    (iaddr: ctxt_iaddress_t) (instr: arm_assembly_instruction_int) =
-    let loc = ctxt_string_to_location faddrdw iaddr in
+    let loc =
+      match ctxt_string_to_location faddrdw iaddr with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"record_instr_type_constraints"
+             ~msg:iaddr __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR "record_instr_type_constraints"]))
+         end in
     let floc = get_floc loc in
     let rewrite_expr (x: xpr_t): xpr_t =
       let x = floc#inv#rewrite_expr x in

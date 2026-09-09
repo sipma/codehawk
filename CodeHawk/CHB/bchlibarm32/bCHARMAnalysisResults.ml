@@ -30,6 +30,7 @@ open CHLogger
 open CHXmlDocument
 
 (* bchlib *)
+open BCHBasicTypes
 open BCHBCTypes
 open BCHByteUtilities
 open BCHFloc
@@ -54,6 +55,9 @@ let bd = BCHDictionary.bdictionary
 let bcd = BCHBCDictionary.bcdictionary
 let mmap = BCHGlobalMemoryMap.global_memory_map
 
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
+
 
 class fn_analysis_results_t (fn:arm_assembly_function_int) =
 object (self)
@@ -69,7 +73,18 @@ object (self)
                    (node:xml_element_int)
                    (ctxtiaddr:ctxt_iaddress_t)
                    (instr:arm_assembly_instruction_int) =
-    let loc = ctxt_string_to_location faddr ctxtiaddr in
+    let loc =
+      match ctxt_string_to_location faddr ctxtiaddr with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"write_xml_instruction"
+             ~msg:ctxtiaddr __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR "write_xml_instruction"]))
+         end in
     let floc = get_floc loc in
     let espoffset = floc#get_stackpointer_offset "arm" in
     let has_control_flow =

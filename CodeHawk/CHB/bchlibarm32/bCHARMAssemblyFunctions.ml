@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2021-2024  Aarno Labs, LLC
+   Copyright (c) 2021-2026  Aarno Labs, LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -338,11 +338,19 @@ object (self)
   method get_function_coverage =
     let table = H.create 37 in
     let add faddr ctxta =
-      let a = (ctxt_string_to_location faddr ctxta)#i in
-      if H.mem table a#index then
-	H.replace table a#index ((H.find table a#index) + 1)
-      else
-	H.add table a#index 1 in
+      TR.tfold
+        ~ok:(fun loc ->
+          let a = loc#i in
+          if H.mem table a#index then
+	    H.replace table a#index ((H.find table a#index) + 1)
+          else
+	    H.add table a#index 1)
+        ~error:(fun e ->
+          log_error_result
+            ~tag:"get_function_coverage"
+            ~msg:faddr#to_hex_string
+            __FILE__ __LINE__ e)
+        (ctxt_string_to_location faddr ctxta) in
     let add_library_stub_instr (iaddr:doubleword_int) =
       if H.mem table iaddr#index then
         ()
@@ -375,11 +383,19 @@ object (self)
   method private get_live_instructions =
     let table = H.create 37 in
     let add faddr ctxta =
-      let a = (ctxt_string_to_location faddr ctxta)#i in
-      if H.mem table a#index then
-        H.replace table a#index ((H.find table a#index) + 1)
-      else
-        H.add table a#index 1 in
+      TR.tfold
+        ~ok:(fun loc ->
+          let a = loc#i in
+          if H.mem table a#index then
+            H.replace table a#index ((H.find table a#index) + 1)
+          else
+            H.add table a#index 1)
+        ~error:(fun e ->
+          log_error_result
+            ~tag:"get_live_instructions"
+            ~msg:faddr#to_hex_string
+            __FILE__ __LINE__ e)
+        (ctxt_string_to_location faddr ctxta) in
     let add_library_stub_instr (iaddr: doubleword_int) =
       if H.mem table iaddr#index then
         ()
@@ -403,13 +419,21 @@ object (self)
   method private get_duplicate_instructions =
     let table = H.create 37 in
     let add faddr ctxta =
-      let a = (ctxt_string_to_location faddr ctxta)#i in
-      let entry =
-        if H.mem table a#index then
-          H.find table a#index
-        else
-          [] in
-        H.add table a#index (faddr#to_hex_string :: entry) in
+      TR.tfold
+        ~ok:(fun loc ->
+          let a = loc#i in
+          let entry =
+            if H.mem table a#index then
+              H.find table a#index
+            else
+              [] in
+          H.add table a#index (faddr#to_hex_string :: entry))
+        ~error:(fun e ->
+          log_error_result
+            ~tag:"get_duplicate_instructions"
+            ~msg:faddr#to_hex_string
+            __FILE__ __LINE__ e)
+        (ctxt_string_to_location faddr ctxta) in
     let _ =
       List.iter (fun f ->
           f#iteri (fun faddr a _ -> add faddr a)) self#get_functions in

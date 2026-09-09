@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2021-2025  Aarno Labs LLC
+   Copyright (c) 2021-2026  Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
    ============================================================================= *)
+
+(* chutil *)
+open CHLogger
 
 (* bchlib *)
 open BCHFloc
@@ -88,17 +91,24 @@ let get_arm_op_metrics (f:arm_assembly_function_int) (_finfo:function_info_int) 
         match ops with
         | [] -> ()
         | _ ->
-           let loc = ctxt_string_to_location faddr ctxtiaddr in
-           let floc = get_floc loc in
-           List.iter (fun (op: arm_operand_int) ->
-               match op#get_mode with
-               | RD -> add_reads floc op
-               | WR -> add_writes floc op
-               | RW ->
-                  begin
-                    add_reads floc op;
-                    add_writes floc op
-                  end) ops) in
+           TR.tfold
+             ~ok:(fun loc ->
+               let floc = get_floc loc in
+               List.iter (fun (op: arm_operand_int) ->
+                   match op#get_mode with
+                   | RD -> add_reads floc op
+                   | WR -> add_writes floc op
+                   | RW ->
+                      begin
+                        add_reads floc op;
+                        add_writes floc op
+                      end) ops)
+             ~error:(fun e ->
+               log_error_result
+                 ~tag: "get_arm_op_metrics"
+                 ~msg:faddr#to_hex_string
+                 __FILE__ __LINE__ e)
+             (ctxt_string_to_location faddr ctxtiaddr)) in
   (!reads, !qreads, !writes, !qwrites)
 
 
@@ -110,13 +120,20 @@ let get_arm_stackpointer_metrics
   let _ =
     f#iteri
       (fun _ ctxtiaddr _ ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
-        let floc = get_floc loc in
-        let (_,range) = floc#get_stackpointer_offset "arm" in
-        if range#isTop then
-          esptop := !esptop + 1
-        else match range#singleton with
-               Some _ -> () | _ -> esprange := !esprange + 1) in
+        TR.tfold
+          ~ok:(fun loc ->
+            let floc = get_floc loc in
+            let (_,range) = floc#get_stackpointer_offset "arm" in
+            if range#isTop then
+              esptop := !esptop + 1
+            else match range#singleton with
+                   Some _ -> () | _ -> esprange := !esprange + 1)
+          ~error:(fun e ->
+            log_error_result
+              ~tag:"get_arm_stackpointer_metrics"
+              ~msg:faddr#to_hex_string
+              __FILE__ __LINE__ e)
+          (ctxt_string_to_location faddr ctxtiaddr)) in
   (!esptop, !esprange)
 
 

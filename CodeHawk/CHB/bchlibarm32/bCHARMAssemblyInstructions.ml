@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2021-2025  Aarno Labs, LLC
+   Copyright (c) 2021-2026  Aarno Labs, LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -1136,15 +1136,25 @@ let get_associated_test_instr
   if finfo#has_associated_cc_setter ctxtiaddr then
     let faddr = finfo#get_address in
     let testiaddr = finfo#get_associated_cc_setter ctxtiaddr in
-    let testloc = BCHLocation.ctxt_string_to_location faddr testiaddr in
-    let testaddr = testloc#i in
     TR.tfold
-      ~ok:(fun testinstr -> Some (testloc, testinstr))
+      ~ok:(fun testloc ->
+        let testaddr = testloc#i in
+        TR.tfold
+          ~ok:(fun testinstr -> Some (testloc, testinstr))
+          ~error:(fun e ->
+            begin
+              log_error_result __FILE__ __LINE__ e;
+              None
+            end)
+          (get_arm_assembly_instruction testaddr))
       ~error:(fun e ->
         begin
-          log_error_result __FILE__ __LINE__ e;
+          log_error_result
+            ~tag:"get_associated_test_instr"
+            ~msg:ctxtiaddr
+            __FILE__ __LINE__ e;
           None
         end)
-      (get_arm_assembly_instruction testaddr)
+      (BCHLocation.ctxt_string_to_location faddr testiaddr)
   else
     None
