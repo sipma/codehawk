@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny B. Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,8 @@ open BCHOperand
 
 module B = Big_int_Z
 module H = Hashtbl
+module TR = CHTraceResult
+
 
 let x2p = xpr_formatter#pr_expr
 
@@ -108,7 +110,7 @@ object (self)
     let rewrite_expr (x: xpr_t):xpr_t =
       floc#inv#rewrite_expr x in
     let rewrite_test_expr (csetter: ctxt_iaddress_t) (x: xpr_t): xpr_t =
-      let testloc = ctxt_string_to_location floc#fa csetter in
+      let testloc = TR.tget_ok (ctxt_string_to_location floc#fa csetter) in
       let testfloc = get_floc testloc in
       let xpr = testfloc#inv#rewrite_expr x in
       simplify_xpr xpr in
@@ -534,7 +536,7 @@ object (self)
       (* ----------------------------------------------------------- Setcc -- *)
       | Setcc (_, op) when floc#f#has_associated_cc_setter floc#cia ->
          let testiaddr = floc#f#get_associated_cc_setter floc#cia in
-         let testloc = ctxt_string_to_location faddr testiaddr in
+         let testloc = TR.tget_ok (ctxt_string_to_location faddr testiaddr) in
          let testopc =
            ((!assembly_instructions)#at_address testloc#i)#get_opcode in
          let setopc = instr#get_opcode in

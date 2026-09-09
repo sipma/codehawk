@@ -251,8 +251,9 @@ let create_annotation_aux (floc:floc_int) =
      make_annotation Assignment (STR "nop")
 
   | Mov ( _, _,src) when src#is_function_argument ->
-    let (callSite, argIndex) = src#get_function_argument in
-    let callSiteFloc = get_floc (ctxt_string_to_location floc#fa callSite) in
+     let (callSite, argIndex) = src#get_function_argument in
+     let callSiteFloc =
+       get_floc (TR.tget_ok (ctxt_string_to_location floc#fa callSite)) in
     if callSiteFloc#has_call_target
        && callSiteFloc#get_call_target#is_signature_valid then
       let fintf = callSiteFloc#get_call_target#get_function_interface in
@@ -1092,7 +1093,8 @@ let create_annotation_aux (floc:floc_int) =
   | Push (_, op) when op#is_function_argument ->
     let rhs = get_rhs op floc in
     let (callSite, argIndex) = op#get_function_argument in
-    let callSiteFloc = get_floc (ctxt_string_to_location floc#fa callSite) in
+    let callSiteFloc =
+      get_floc (TR.tget_ok (ctxt_string_to_location floc#fa callSite)) in
     if callSiteFloc#has_call_target
        && floc#get_call_target#is_signature_valid then
       let fintf = callSiteFloc#get_call_target#get_function_interface in
@@ -1213,7 +1215,7 @@ let create_annotation_aux (floc:floc_int) =
 
   | Setcc (_, op) when floc#f#has_associated_cc_setter floc#cia ->
      let testIAddr = floc#f#get_associated_cc_setter floc#cia in
-     let testloc = ctxt_string_to_location floc#fa testIAddr in
+     let testloc = TR.tget_ok (ctxt_string_to_location floc#fa testIAddr) in
      let testAddr = testloc#i in
      let testopc = ((!assembly_instructions)#at_address testAddr)#get_opcode in
      let setopc = instr#get_opcode in

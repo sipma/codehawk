@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020      Henny B. Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,7 @@ open BCHX86OpcodeRecords
 
 module H = Hashtbl
 module FFU = BCHFileFormatUtil
+module TR = CHTraceResult
 
 
 class assembly_function_t
@@ -136,10 +137,17 @@ object (self)
     let _ =
       self#iteri
         (fun faddr ctxtiaddr instr ->
-          let iloc = ctxt_string_to_location faddr ctxtiaddr in
-          let floc = get_floc iloc in
-          if instr#is_esp_manipulating floc then
-            result := ctxtiaddr :: !result) in
+          TR.tfold
+            ~ok:(fun iloc ->
+              let floc = get_floc iloc in
+              if instr#is_esp_manipulating floc then
+                result := ctxtiaddr :: !result)
+            ~error:(fun e ->
+              log_error_result
+                ~tag:"is_esp_manipulating"
+                ~msg:ctxtiaddr
+                __FILE__ __LINE__ e)
+            (ctxt_string_to_location faddr ctxtiaddr)) in
     !result
 
   method get_stack_adjustment =
@@ -148,7 +156,7 @@ object (self)
     let _ =
       self#iteri
         (fun faddr ctxtiaddr instr ->
-          let iloc = ctxt_string_to_location faddr ctxtiaddr in
+          let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
           if iloc#has_context then
             ()
           else
@@ -253,7 +261,7 @@ object (self)
     let _ =
       self#iteri
         (fun _ ctxtiaddr instr ->
-          let iloc = ctxt_string_to_location faddr ctxtiaddr in
+          let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
 	  match instr#get_opcode with
 	  | IndirectCall _ ->
 	     let floc = get_floc iloc in
@@ -270,7 +278,7 @@ object (self)
   method populate_callgraph (callgraph:callgraph_int) =
     let finfo = get_function_info faddr in
     self#iteri (fun _ ctxtiaddr instr ->
-        let iloc = ctxt_string_to_location faddr ctxtiaddr in
+        let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
         match instr#get_opcode with
 	  DirectCall _ | IndirectCall _ | IndirectJmp _ ->
 	  let floc = get_floc iloc in
@@ -341,7 +349,7 @@ object (self)
 
   method iter_calls (f:ctxt_iaddress_t -> floc_int -> unit) =
     self#iteri (fun _ ctxtiaddr instr ->
-        let iloc = ctxt_string_to_location faddr ctxtiaddr in
+        let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
       match instr#get_opcode with
       | DirectCall _ | IndirectCall _ -> f ctxtiaddr (get_floc iloc)
       | IndirectJmp _
@@ -485,7 +493,7 @@ let get_op_metrics (f:assembly_function_int) (finfo:function_info_int) =
     match ops with
     | [] -> ()
     | _ ->
-       let loc = ctxt_string_to_location faddr ctxtiaddr in
+       let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
        let floc = get_floc loc in
        List.iter (fun (op:operand_int) ->
 	   match op#get_mode with
@@ -503,7 +511,7 @@ let get_esp_metrics (f:assembly_function_int): (int * int) =
   let _ =
     f#iteri
       (fun _ ctxtiaddr _ ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
+        let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
         let floc = get_floc loc in
         let (_, range) = floc#get_stackpointer_offset "x86" in
         if range#isTop then

@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -314,7 +314,7 @@ let resolve_pic_target floc instr =
 let resolve_pic_targets faddr f =
   f#iteri
     (fun _ ctxtiaddr instr ->
-      let loc = ctxt_string_to_location faddr ctxtiaddr in
+      let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
       let floc = get_floc loc in
       resolve_pic_target floc instr)
 
@@ -700,7 +700,8 @@ let trace_block (faddr:doubleword_int) (baddr:doubleword_int) =
               | [] ->
                  [(make_location {loc_faddr = faddr; loc_iaddr = returnsite})#ci]
               | l ->
-                 List.map (fun s -> add_ctxt_to_ctxt_string faddr s ctxt) l in
+                 List.map (fun s ->
+                     TR.tget_ok (add_ctxt_to_ctxt_string faddr s ctxt)) l in
             make_ctxt_assembly_block ctxt b succ) fn#get_blocks in
       (Some [callsucc], va, inlinedblocks)
     else if !assembly_instructions#has_next_valid_instruction va then
@@ -726,7 +727,7 @@ let trace_function (faddr:doubleword_int) =
   let workSet = new DoublewordCollections.set_t in
   let doneSet = new DoublewordCollections.set_t in
   let set_block_entry a = (!assembly_instructions#at_address a)#set_block_entry in
-  let get_iaddr s = (ctxt_string_to_location faddr s)#i in
+  let get_iaddr s = (TR.tget_ok (ctxt_string_to_location faddr s))#i in
   let add_to_workset l =
     List.iter (fun a -> if doneSet#has a then () else workSet#add a) l in
   let blocks = ref [] in
@@ -802,7 +803,7 @@ let record_call_targets () =
         begin
           f#iteri
             (fun _  ctxtiaddr instr ->
-              let loc = ctxt_string_to_location faddr ctxtiaddr in
+              let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
               let floc = get_floc loc in
               match instr#get_opcode with
               (* | DirectCall op when
@@ -859,7 +860,7 @@ let associate_condition_code_users () =
     let rec set l =
       match l with
       | [] ->
-	  let loc = ctxt_string_to_location faddr ctxtiaddr in
+	  let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
 	  disassembly_log#add
             "cc user without setter"
 	    (LBLOCK [
@@ -871,7 +872,7 @@ let associate_condition_code_users () =
 	| [] -> set tl
 	| flags_set ->
 	  if List.for_all (fun fUsed -> List.mem fUsed flags_set) flags_used then
-             let iloc = ctxt_string_to_location faddr ctxtiaddr in
+             let iloc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
              let instrctxt = (make_i_location iloc instr#get_address)#ci in
 	    finfo#connect_cc_user ctxtiaddr instrctxt in
     set revInstrs in
@@ -902,14 +903,14 @@ let associate_function_arguments_push () =
     let first = ref true in
     let compensateForPop = ref 0 in
     let valid = ref true in
-    let callloc = ctxt_string_to_location faddr callAddress  in
+    let callloc = TR.tget_ok (ctxt_string_to_location faddr callAddress)  in
     block#itera
       ~high:callloc#i ~reverse:true
       (fun ctxtiaddr instr ->
         if !first then
           first := false   (* skip the call itself *)
         else
-          let loc = ctxt_string_to_location faddr ctxtiaddr in
+          let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
           if !valid && !active && !argNr < numParams then
             match instr#get_opcode with
             | Pop _ -> compensateForPop := !compensateForPop + 1
@@ -949,7 +950,7 @@ let associate_function_arguments_push () =
     let compensateForPop = ref false in
     let valid = ref true in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc = TR.tget_ok (ctxt_string_to_location faddr callAddress) in
     block#itera
       ~high:callloc#i
       ~reverse:true
@@ -986,7 +987,7 @@ let associate_function_arguments_push () =
           (fun block ->
             block#itera
               (fun ctxtiaddr instr ->
-                let loc = ctxt_string_to_location faddr ctxtiaddr in
+                let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
                 let floc = get_floc loc in
                 match instr#get_opcode with
                 | DirectCall op when
@@ -1028,7 +1029,7 @@ let associate_function_arguments_mov () =
     let argumentsFound = ref [] in
     let maxIndex = ref 0 in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc = TR.tget_ok (ctxt_string_to_location faddr callAddress) in
     begin
       block#itera ~high:callloc#i ~reverse:true
 	(fun _va instr ->
@@ -1076,7 +1077,7 @@ let associate_function_arguments_mov () =
     let first = ref true in
     let argumentsFound = ref [] in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc = TR.tget_ok (ctxt_string_to_location faddr callAddress) in
     begin
       block#itera ~high:callloc#i ~reverse:true
 	(fun _va instr ->
@@ -1120,7 +1121,7 @@ let associate_function_arguments_mov () =
 	  (fun block ->
 	    block#itera
 	      (fun ctxtiaddr instr ->
-                let loc = ctxt_string_to_location faddr ctxtiaddr in
+                let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
 		let floc = get_floc loc in
 		match instr#get_opcode with
 		| DirectCall op when

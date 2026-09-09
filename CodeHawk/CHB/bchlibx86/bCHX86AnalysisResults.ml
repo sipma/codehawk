@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020      Henny B. Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,7 @@ open BCHX86Dictionary
 open BCHX86OpcodeRecords
 
 module H = Hashtbl
+module TR = CHTraceResult
 
 
 class fn_analysis_results_t (fn:assembly_function_int) =
@@ -63,7 +64,7 @@ object (self)
                    (node:xml_element_int)
                    (ctxtiaddr:ctxt_iaddress_t)
                    (instr:assembly_instruction_int) =
-    let loc = ctxt_string_to_location faddr ctxtiaddr in
+    let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
     let floc = get_floc loc in
     let espoffset = floc#get_stackpointer_offset "x86" in
     begin

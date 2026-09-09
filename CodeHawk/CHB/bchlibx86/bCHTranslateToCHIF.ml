@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny B. Sipma
-   Copyright (c) 2021-2024 Aarno Labss LLC
+   Copyright (c) 2021-2026 Aarno Labss LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -124,7 +124,7 @@ let is_invariant_opname (name:symbol_t) = name#getBaseName = "invariant"
 
 
 let is_eh_prolog (finfo:function_info_int) (iaddr:ctxt_iaddress_t) =
-  let loc = ctxt_string_to_location finfo#a iaddr in
+  let loc = TR.tget_ok (ctxt_string_to_location finfo#a iaddr) in
   let floc = get_floc loc in
   floc#has_call_target && floc#get_call_target#get_name = "_EH_prolog"
 
@@ -436,7 +436,7 @@ let translate_instruction
   let _ = count_instruction () in
   let (ctxtiaddr,instruction) = code_pc#get_next_instruction in
   let faddr = function_location#f in
-  let loc = ctxt_string_to_location faddr ctxtiaddr in
+  let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
   let finfo = get_function_info faddr in
   let inv = finfo#iinv ctxtiaddr in
   let env = finfo#env in
@@ -465,8 +465,9 @@ let translate_instruction
       let transaction = package_transaction finfo block_label cmds in
       if finfo#has_associated_cc_setter ctxtiaddr then
 	let testIAddress = finfo#get_associated_cc_setter ctxtiaddr in
-        let testloc = ctxt_string_to_location faddr testIAddress in
-        let testAddress = (ctxt_string_to_location faddr testIAddress)#i in
+        let testloc = TR.tget_ok (ctxt_string_to_location faddr testIAddress) in
+        let testAddress =
+          (TR.tget_ok (ctxt_string_to_location faddr testIAddress))#i in
 	let (nodes,edges) =
           make_condition
 	    ~jump_instruction:instruction

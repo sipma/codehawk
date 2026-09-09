@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020-2023 Henny B. Sipma
-   Copyright (c) 2024      Aarno Labs LLC
+   Copyright (c) 2024-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,8 @@ open BCHLocation
 open BCHLibx86Types
 open BCHLoopStructure
 open BCHX86OpcodeRecords
+
+module TR = CHTraceResult
 
 
 let get_op_metrics (f:assembly_function_int) (finfo:function_info_int) =
@@ -67,7 +69,7 @@ let get_op_metrics (f:assembly_function_int) (finfo:function_info_int) =
     match ops with
     | [] -> ()
     | _ ->
-       let loc = ctxt_string_to_location faddr ctxtiaddr in
+       let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
        let floc = get_floc loc in
        List.iter (fun (op:operand_int) ->
 	   match op#get_mode with
@@ -85,7 +87,7 @@ let get_esp_metrics (f:assembly_function_int) (_finfo:function_info_int) =
   let _ =
     f#iteri
       (fun _ ctxtiaddr _ ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
+        let loc = TR.tget_ok (ctxt_string_to_location faddr ctxtiaddr) in
         let floc = get_floc loc in
         let (_,range) = floc#get_stackpointer_offset "x86" in
         if range#isTop then

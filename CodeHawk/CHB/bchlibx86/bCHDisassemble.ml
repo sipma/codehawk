@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2020 Kestrel Technology LLC
    Copyright (c) 2020-2021 Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,10 @@ let log_error (tag: string) (msg: string): tracelogspec_t =
 
 
 let pr_expr = xpr_formatter#pr_expr
+
+let eloc (line: int): string = __FILE__ ^ ":" ^ (string_of_int line)
+let elocm (line: int): string = (eloc line) ^ ": "
+
 
 module DoublewordCollections = CHCollections.Make (
   struct
@@ -1125,7 +1129,18 @@ let trace_block (faddr:doubleword_int) (baddr:doubleword_int) =
               | [] ->
                  [(make_location {loc_faddr = faddr; loc_iaddr = returnsite})#ci]
               | l ->
-                 List.map (fun s -> add_ctxt_to_ctxt_string faddr s ctxt) l in
+                 List.map (fun s ->
+                     let newctxtstr = add_ctxt_to_ctxt_string faddr s ctxt in
+                     match newctxtstr with
+                     | Ok ctxtstr -> ctxtstr
+                     | Error e ->
+                        begin
+                          log_error_result
+                            ~tag:"find_last_instruction" __FILE__ __LINE__ e;
+                          raise
+                            (BCH_failure
+                               (LBLOCK [STR (elocm __LINE__); STR s]))
+                        end) l in
             make_ctxt_assembly_block ctxt b succ) fn#get_blocks in
       (Some [callsucc], va, inlinedblocks)
     else if !assembly_instructions#has_next_valid_instruction va then
@@ -1148,7 +1163,20 @@ let trace_function (faddr:doubleword_int) =
   let workSet = new DoublewordCollections.set_t in   (* toplevel only *)
   let doneSet = new DoublewordCollections.set_t in   (* toplevel only *)
   let set_block_entry a = (!assembly_instructions#at_address a)#set_block_entry in
-  let get_iaddr s = (ctxt_string_to_location faddr s)#i in
+  let get_iaddr s =
+    TR.tfold
+      ~ok:(fun loc -> loc#i)
+      ~error:(fun e ->
+        begin
+          log_error_result
+            ~tag:"trace_function"
+            ~msg:faddr#to_hex_string
+            __FILE__ __LINE__ e;
+          raise
+            (BCH_failure
+               (LBLOCK [STR (elocm __LINE__); faddr#toPretty; STR ": "; STR s]))
+        end)
+      (ctxt_string_to_location faddr s) in
   let add_to_workset l =
     List.iter (fun a -> if doneSet#has a then () else workSet#add a) l in
   let blocks = ref [] in
@@ -1300,7 +1328,20 @@ let record_call_targets () =
 	  count := !count + 1;
 	  f#iteri
             (fun _ ctxtiaddr instr ->
-              let loc = ctxt_string_to_location faddr ctxtiaddr in
+              let loc =
+                match ctxt_string_to_location faddr ctxtiaddr with
+                | Ok loc -> loc
+                | Error e ->
+                   begin
+                     log_error_result
+                       ~tag:"record_call_targets"
+                       ~msg:faddr#to_hex_string
+                       __FILE__ __LINE__ e;
+                     raise
+                       (BCH_failure
+                          (LBLOCK [STR (elocm __LINE__);
+                                   STR (String.concat "; " e)]))
+                   end in
               let floc = get_floc loc in
               let iaddr = loc#i in
 	      match instr#get_opcode with
@@ -1414,7 +1455,19 @@ let associate_condition_code_users () =
     let rec set l =
       match l with
       | [] ->
-	  let loc = ctxt_string_to_location faddr ctxtiaddr in
+	 let loc =
+           match ctxt_string_to_location faddr ctxtiaddr with
+           | Ok loc -> loc
+           | Error e ->
+              begin
+                log_error_result
+                  ~tag:"associate_condition_code_users"
+                  ~msg:faddr#to_hex_string
+                  __FILE__ __LINE__ e;
+                raise
+                  (BCH_failure
+                     (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+                  end in
 	  disassembly_log#add
             "cc user without setter"
 	    (LBLOCK [
@@ -1425,9 +1478,16 @@ let associate_condition_code_users () =
 	| [] -> set tl
 	| flags_set ->
 	   if List.for_all (fun fUsed -> List.mem fUsed flags_set) flags_used then
-             let iloc = ctxt_string_to_location faddr ctxtiaddr in
-             let instrctxt = (make_i_location iloc instr#get_address)#ci in
-	     finfo#connect_cc_user ctxtiaddr instrctxt
+             TR.tfold
+               ~ok:(fun iloc ->
+                 let instrctxt = (make_i_location iloc instr#get_address)#ci in
+	         finfo#connect_cc_user ctxtiaddr instrctxt)
+               ~error:(fun e ->
+                 log_error_result
+                   ~tag:"associate_condition_code_users"
+                   ~msg:faddr#to_hex_string
+                   __FILE__ __LINE__ e)
+               (ctxt_string_to_location faddr ctxtiaddr)
            else
              chlog#add
                "no flag setter"
@@ -1471,14 +1531,38 @@ let associate_function_arguments_push () =
     let first = ref true in
     let compensateForPop = ref 0 in
     let valid = ref true in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc =
+      match ctxt_string_to_location faddr callAddress with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"associate_function_arguments_push"
+             ~msg:faddr#to_hex_string
+             __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+         end in
     block#itera
       ~high:callloc#i ~reverse:true
       (fun ctxtiaddr instr ->
 	if !first then
           first := false        (* skip the call itself *)
 	else
-          let loc = ctxt_string_to_location faddr ctxtiaddr in
+          let loc =
+            match ctxt_string_to_location faddr ctxtiaddr with
+            | Ok loc -> loc
+            | Error e ->
+               begin
+                 log_error_result
+                   ~tag:"associate_function_arguments_push"
+                   ~msg:faddr#to_hex_string
+                   __FILE__ __LINE__ e;
+                 raise
+                   (BCH_failure
+                      (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+               end in
 	  if !valid && !active && !argNr < numParams then
 	    match instr#get_opcode with
 	    | Pop _ -> compensateForPop := !compensateForPop + 1
@@ -1519,7 +1603,19 @@ let associate_function_arguments_push () =
     let compensateForPop = ref false in
     let valid = ref true in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc =
+      match ctxt_string_to_location faddr callAddress with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"identify_arguments"
+             ~msg:callAddress
+             __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+         end in
     block#itera
       ~high:callloc#i ~reverse:true
       (fun _ctxtiaddr instr ->
@@ -1555,7 +1651,19 @@ let associate_function_arguments_push () =
 	  (fun block ->
 	    block#itera
 	      (fun ctxtiaddr instr ->
-                let loc = ctxt_string_to_location faddr ctxtiaddr in
+                let loc =
+                  match ctxt_string_to_location faddr ctxtiaddr with
+                  | Ok loc -> loc
+                  | Error e ->
+                     begin
+                       log_error_result
+                         ~tag:"identify_arguments"
+                         ~msg:faddr#to_hex_string
+                         __FILE__ __LINE__ e;
+                       raise
+                         (BCH_failure
+                            (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+                         end in
                 let iaddr = loc#i in
 		let floc = get_floc loc in
 		match instr#get_opcode with
@@ -1605,7 +1713,19 @@ let associate_function_arguments_mov () =
     let argumentsFound = ref [] in
     let maxIndex = ref 0 in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc =
+      match ctxt_string_to_location faddr callAddress with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"associate_function_arguments_mov"
+             ~msg:faddr#to_hex_string
+             __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+             end in
     begin
       block#itera ~high:callloc#i ~reverse:true
 	(fun _va instr ->
@@ -1654,7 +1774,19 @@ let associate_function_arguments_mov () =
     let first = ref true in
     let argumentsFound = ref [] in
     let faddr = block#get_faddr in
-    let callloc = ctxt_string_to_location faddr callAddress in
+    let callloc =
+      match ctxt_string_to_location faddr callAddress with
+      | Ok loc -> loc
+      | Error e ->
+         begin
+           log_error_result
+             ~tag:"identify_arguments"
+             ~msg:faddr#to_hex_string
+             __FILE__ __LINE__ e;
+           raise
+             (BCH_failure
+                (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+         end in
     begin
       block#itera ~high:callloc#i ~reverse:true
 	(fun _va instr ->
@@ -1697,7 +1829,19 @@ let associate_function_arguments_mov () =
 	  (fun block ->
 	    block#itera
 	      (fun ctxtiaddr instr ->
-                let loc = ctxt_string_to_location faddr ctxtiaddr in
+                let loc =
+                  match ctxt_string_to_location faddr ctxtiaddr with
+                  | Ok loc -> loc
+                  | Error e ->
+                     begin
+                       log_error_result
+                         ~tag:"sanitize_arguments"
+                         ~msg:faddr#to_hex_string
+                         __FILE__ __LINE__ e;
+                       raise
+                         (BCH_failure
+                            (LBLOCK [STR (elocm __LINE__); STR (String.concat "; " e)]))
+                     end in
 		let floc = get_floc loc in
 		match instr#get_opcode with
 		| DirectCall op when
@@ -1920,23 +2064,30 @@ let resolve_indirect_calls (f:assembly_function_int) =
   let _ =
     f#iteri
       (fun faddr ctxtiaddr instr ->
-        let loc = ctxt_string_to_location faddr ctxtiaddr in
-        match instr#get_opcode with
-        | IndirectCall op ->
-           let floc = get_floc loc in
-           if (not floc#has_call_target)
-              || floc#get_call_target#is_unknown then
-             let _ =
-               chlog#add
-                 "attempt to resolve call"
-                 (LBLOCK [
-                      floc#l#toPretty;
-                      (if floc#get_call_target#is_unknown then
-                         STR " (call target unknown)"
-                       else
-                         STR " (no call target)")]) in
-             set_call_address floc op
-        | _ -> ()) in
+        TR.tfold
+          ~ok:(fun loc ->
+            match instr#get_opcode with
+            | IndirectCall op ->
+               let floc = get_floc loc in
+               if (not floc#has_call_target)
+                  || floc#get_call_target#is_unknown then
+                 let _ =
+                   chlog#add
+                     "attempt to resolve call"
+                     (LBLOCK [
+                          floc#l#toPretty;
+                          (if floc#get_call_target#is_unknown then
+                             STR " (call target unknown)"
+                           else
+                             STR " (no call target)")]) in
+                 set_call_address floc op
+            | _ -> ())
+          ~error:(fun e ->
+            log_error_result
+              ~tag:"resolve_indirect_calls"
+              ~msg:faddr#to_hex_string
+              __FILE__ __LINE__ e)
+       (ctxt_string_to_location faddr ctxtiaddr)) in
   ()
 
 

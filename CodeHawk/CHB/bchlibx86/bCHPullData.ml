@@ -6,7 +6,7 @@
 
    Copyright (c) 2005-2019 Kestrel Technology LLC
    Copyright (c) 2020      Henny Sipma
-   Copyright (c) 2021-2024 Aarno Labs LLC
+   Copyright (c) 2021-2026 Aarno Labs LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -76,7 +76,8 @@ let get_module_string (floc:floc_int) (xpr:xpr_t) =
       log_tfold
         (log_error "get_module_string" "invalid call site")
         ~ok:(fun callsite ->
-          let cFloc = get_floc (ctxt_string_to_location floc#fa callsite) in
+          let cFloc =
+            get_floc (TR.tget_ok (ctxt_string_to_location floc#fa callsite)) in
           match cFloc#get_call_args with
           | [(_, vxpr)]
             | [(_, vxpr); _; _] -> get_string_reference floc vxpr
@@ -176,7 +177,8 @@ and get_decodepointer_target (floc:floc_int) =
          log_tfold
            (log_error "get_decodepointer_target" "invalid call site")
            ~ok:(fun callsite ->
-	     let rfloc = get_floc (ctxt_string_to_location floc#fa callsite) in
+	     let rfloc =
+               get_floc (TR.tget_ok (ctxt_string_to_location floc#fa callsite)) in
 	     get_rv_call_targets floc rfloc [])
            ~error:(fun _ -> [])
            (floc#env#get_call_site v)
@@ -194,7 +196,8 @@ and get_encodepointer_target (floc:floc_int): call_target_t list =
          log_tfold
            (log_error "get_encodepointer_target" "invalid call site")
            ~ok:(fun callsite ->
-             let rfloc = get_floc (ctxt_string_to_location floc#fa callsite) in
+             let rfloc =
+               get_floc (TR.tget_ok (ctxt_string_to_location floc#fa callsite)) in
 	     get_rv_call_targets floc rfloc [])
            ~error:(fun _ -> [])
            (floc#env#get_call_site v)
@@ -269,7 +272,8 @@ and extract_call_target
      log_tfold
        (log_error "extract_call_target" "invalid call target")
      ~ok:(fun callsite ->
-       let rfloc = get_floc (ctxt_string_to_location cfloc#fa callsite) in
+       let rfloc =
+         get_floc (TR.tget_ok (ctxt_string_to_location cfloc#fa callsite)) in
        get_rv_call_targets cfloc rfloc offsets)
      ~error:(fun _ -> [])
      (env#get_call_site v)
