@@ -4484,6 +4484,8 @@ let translate_arm_instruction
 
   | VectorShiftRightNarrow _ -> default []
 
+  | VectorSquareRoot _ -> default []
+
   | VStoreRegister(c, dd, rn, mem) ->
      let xdd_r = dd#to_expr floc in
      let xrn_r = rn#to_expr floc in

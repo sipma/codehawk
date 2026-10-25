@@ -1669,6 +1669,14 @@ let get_record (opc:arm_opcode_t): 'a opcode_record_t =
       ccode = Some c;
       ida_asm = (fun f -> f#opscc ~dt "VSHRN" c [dst; src; imm])
     }
+  | VectorSquareRoot (c, dt, dst, src) -> {
+      mnemonic = "VSQRT";
+      operands = [dst; src];
+      flags_set = [];
+      flags_used = [];
+      ccode = Some c;
+      ida_asm = (fun f -> f#opscc ~dt "VSQRT" c [dst; src])
+    }
   | VStoreRegister (c, src, base, mem) -> {
       mnemonic = "VSTR";
       operands = [src; base; mem];

@@ -1324,6 +1324,11 @@ type arm_opcode_t =
       * arm_operand_int (* destination *)
       * arm_operand_int (* source register *)
       * arm_operand_int (* source immediate *)
+  | VectorSquareRoot of
+      arm_opcode_cc_t   (* condition *)
+      * vfp_datatype_t  (* data type *)
+      * arm_operand_int (* destination *)
+      * arm_operand_int (* source register *)
   | VStoreRegister of
       arm_opcode_cc_t   (* condition *)
       * arm_operand_int (* floating-point source register *)

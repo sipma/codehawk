@@ -493,6 +493,8 @@ object (self)
          (ctags c, [di dt; oi dst; oi src; oi imm])
       | VectorShiftRightNarrow (c, dt, dst, src, imm) ->
          (ctags c, [di dt; oi dst; oi src; oi imm])
+      | VectorSquareRoot (c, dt, dst, src) ->
+         (ctags c, [di dt; oi dst; oi src])
       | VStoreRegister (c, src, base, mem) ->
          (ctags c, [oi src; oi base; oi mem])
       | VectorStoreMultipleDecrementBefore (wb, c, rn, rl, mem) ->

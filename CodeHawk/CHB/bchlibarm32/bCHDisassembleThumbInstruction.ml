@@ -4,7 +4,7 @@
    ------------------------------------------------------------------------------
    The MIT License (MIT)
 
-   Copyright (c) 2021-2024  Aarno Labs, LLC
+   Copyright (c) 2021-2026  Aarno Labs, LLC
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -1673,6 +1673,17 @@ let parse_thumb32_29_13
   (* The various VCVT forms *)
   | (3, (0 | 1), 1, 0) ->
      (match (cmode, b 19 16) with
+
+      (* VSQRT double precision *)
+      (* < 29><13>D11< 1><vd><5>111M0<vm>  VSQRT - T1-dp *)
+      | (1, 1) when (bv 8 = 1) && (bv 7 = 1) ->
+         let d = prefix_bit (bv 22) (b 15 12) in
+         let m = prefix_bit (bv 5) (b 3 0) in
+         let vd = arm_extension_register_op XDouble d in
+         let vm = arm_extension_register_op XDouble m in
+         let dtd = VfpFloat 64 in
+         (* VSQRT<c>.F64 <Dd>, <Dm> *)
+         VectorSquareRoot (cc, dtd, vd WR, vm RD)
 
       (* VCVT between double-precision and single-precision *)
       (* < 29><13>D11< 7><vd><5>011M0<vm> VCVT - T1-sd *)
