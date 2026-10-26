@@ -4608,6 +4608,28 @@ object (self)
          let (tags, args) = add_optional_instr_condition tagstring args c in
          (tags, args)
 
+      | VectorAdd(c, _, dst, src1, src2) ->
+         let vdst_r = dst#to_variable floc in
+         let xdst_r = dst#to_expr floc in
+         let rxdst_r = TR.tmap rewrite_expr xdst_r in
+         let xsrc1_r = src1#to_expr floc in
+         let rxsrc1_r = TR.tmap rewrite_expr xsrc1_r in
+         let xsrc2_r = src2#to_expr floc in
+         let rxsrc2_r = TR.tmap rewrite_expr xsrc2_r in
+         let rdefs = [get_rdef_r xsrc1_r; get_rdef_r xsrc2_r] in
+         let uses = [get_def_use_r vdst_r] in
+         let useshigh = [get_def_use_high_r vdst_r] in
+         let (tagstring, args) =
+           mk_instrx_data_r
+             ~vars_r:[vdst_r]
+             ~xprs_r:[xsrc1_r; xsrc2_r; xdst_r; rxsrc1_r; rxsrc2_r; rxdst_r]
+             ~rdefs
+             ~uses
+             ~useshigh
+             () in
+         let (tags, args) = add_optional_instr_condition tagstring args c in
+         (tags, args)
+
       | VCompare (_, c, _, fdst, src1, src2) ->
          let v_fpscr_r = fdst#to_variable floc in
          let xsrc1_r = src1#to_expr floc in
@@ -4834,6 +4856,28 @@ object (self)
          let (tags, args) = add_optional_instr_condition tagstring args c in
          (tags, args)
 
+      | VectorMultiply(c, _, dst, src1, src2) ->
+         let vdst_r = dst#to_variable floc in
+         let xdst_r = dst#to_expr floc in
+         let rxdst_r = TR.tmap rewrite_expr xdst_r in
+         let xsrc1_r = src1#to_expr floc in
+         let rxsrc1_r = TR.tmap rewrite_expr xsrc1_r in
+         let xsrc2_r = src2#to_expr floc in
+         let rxsrc2_r = TR.tmap rewrite_expr xsrc2_r in
+         let rdefs = [get_rdef_r xsrc1_r; get_rdef_r xsrc2_r] in
+         let uses = [get_def_use_r vdst_r] in
+         let useshigh = [get_def_use_high_r vdst_r] in
+         let (tagstring, args) =
+           mk_instrx_data_r
+             ~vars_r:[vdst_r]
+             ~xprs_r:[xsrc1_r; xsrc2_r; xdst_r; rxsrc1_r; rxsrc2_r; rxdst_r]
+             ~rdefs
+             ~uses
+             ~useshigh
+             () in
+         let (tags, args) = add_optional_instr_condition tagstring args c in
+         (tags, args)
+
       | VectorMultiplySubtract (c, _, dst, src1, src2) ->
          let vdst_r = dst#to_variable floc in
          let xdst_r = dst#to_expr floc in
@@ -4849,6 +4893,24 @@ object (self)
            mk_instrx_data_r
              ~vars_r:[vdst_r]
              ~xprs_r:[xsrc1_r; xsrc2_r; xdst_r; rxsrc1_r; rxsrc2_r; rxdst_r]
+             ~rdefs
+             ~uses
+             ~useshigh
+             () in
+         let (tags, args) = add_optional_instr_condition tagstring args c in
+         (tags, args)
+
+      | VectorNegate (c, _, dst, src) ->
+         let vdst_r = dst#to_variable floc in
+         let xsrc_r = src#to_expr floc in
+         let rxsrc_r = TR.tmap rewrite_expr xsrc_r in
+         let rdefs = [get_rdef_r xsrc_r] in
+         let uses = [get_def_use_r vdst_r] in
+         let useshigh = [get_def_use_high_r vdst_r] in
+         let (tagstring, args) =
+           mk_instrx_data_r
+             ~vars_r:[vdst_r]
+             ~xprs_r:[xsrc_r; rxsrc_r]
              ~rdefs
              ~uses
              ~useshigh
