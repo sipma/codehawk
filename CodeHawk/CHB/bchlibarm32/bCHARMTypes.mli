@@ -87,8 +87,8 @@ type dmb_option_t =  (* data memory barrier option *)
 
 type vfp_datatype_t =    (* Advanced SIMD extension A2.6.3 *)
   | VfpNone
-  | VfpSize of int
-  | VfpFloat of int
+  | VfpSize of int     (* size in bits *)
+  | VfpFloat of int    (* size in bits *)
   | VfpInt of int
   | VfpPolynomial of int
   | VfpSignedInt of int
