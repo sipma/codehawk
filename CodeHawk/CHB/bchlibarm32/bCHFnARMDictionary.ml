@@ -2097,14 +2097,14 @@ object (self)
                    ~condloc:floc#l
                    ~testloc:testloc in
                let (tags, args) =
+                 let lhs_r = dstop#to_variable floc in
+                 let uses = [get_def_use_r lhs_r] in
+                 let useshigh = [get_def_use_high_r lhs_r] in
                  (match optpredicate with
                   | Some p ->
                      let p = if inverse then XOp (XLNot, [p]) else p in
-                     let lhs_r = dstop#to_variable floc in
                      let rdefs = get_all_rdefs p in
                      let xp = rewrite_expr p in
-                     let uses = [get_def_use_r lhs_r] in
-                     let useshigh = [get_def_use_high_r lhs_r] in
                      let (tagstring, args) =
                        mk_instrx_data_r
                          ~vars_r:[lhs_r]
@@ -2113,9 +2113,11 @@ object (self)
                          ~uses
                          ~useshigh
                          () in
-                     ([tagstring], args)
+                     ([tagstring; "agg:predassign"], args)
                   | _ ->
-                     ([], [])) in
+                     let (tagstring, args) =
+                       mk_instrx_data_r ~vars_r:[lhs_r] ~uses ~useshigh () in
+                     ([tagstring; "agg:predassign:nd"], args)) in
                let dependents =
                  List.map (fun d ->
                      (make_i_location floc#l d#get_address)#ci) agg#instrs in
